@@ -1,0 +1,604 @@
+---
+title: "Source Data"
+author: "Lauren White (lauren.white@cdph.ca.gov)"
+date: '2024-05-01'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+This is an optional file to run that will independently source data sources that is available in the in `/data` folder of this repository. 
+
+## Setup
+
+```{r setup, include=FALSE}
+
+library(jsonlite)
+library(httr)
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(readr)
+library(ggplot2)
+library(tsibble)
+library(MMWRweek)
+library(covidcast)
+library(RSocrata)
+library(epipredict)
+library(arrow)
+
+season22_start_MMWR<- as.Date("2022-10-02")  #Beginning of week 40 for 2022-2023 season
+season23_start_MMWR<- as.Date("2023-10-01") #Beginning of week 40 for 2023-2024 season
+season22_start<-  as.Date("2022-07-01")
+season23_start<- as.Date("2023-07-01")
+season24_end<- as.Date("2024-04-30") #End of mandatory NHSN reporting period in 2024
+
+```
+
+
+## Load US demographic info
+https://api.census.gov/data/2021/pep/population/variables.html
+
+To replicate this chunk in full, you will need your own US Census API key (replace ####s in api link below): https://api.census.gov/data/key_signup.html
+
+Alternatively, load combined US demographic data from `/data/demog.csv`
+
+```{r us-pop}
+res = GET("https://api.census.gov/data/2021/pep/population?get=DENSITY_2021,POP_2021,NAME,STATE&for=state:*&key=####")
+state =  as.data.frame(fromJSON(rawToChar(res$content)))
+colnames(state)<-state[1,]
+state = state[-1,]
+state<-state %>% mutate(STATE=as.numeric(STATE))
+
+res_us = GET("https://api.census.gov/data/2021/pep/population?get=DENSITY_2021,POP_2021,NAME,STATE&for=us:*&key=####")
+us = as.data.frame(fromJSON(rawToChar(res_us$content)))
+colnames(us)<-us[1,]
+us = us[-1,]
+us$STATE<-0
+us_density<-bind_rows(state, us) %>% dplyr::select(-us, -state) %>% rename(name=NAME)
+
+demog<-state_census %>% #note state_census object is loaded from epipredict package
+  left_join(us_density, by=c("name")) %>%
+  dplyr::select(pop=POP_2021, density= DENSITY_2021, location=abbr) %>%
+  mutate(location=tolower(location), density=as.numeric(density), pop=as.numeric(pop)) %>%
+  na.omit() #omit US territories (e.g. Guam, Virgin Islands, Puerto Rico)
+
+write_csv(demog, "data/demog.csv")
+
+```
+
+## Load hospital capacity data
+
+```{r hosp-capacity}
+beds_raw<- read.socrata("https://healthdata.gov/resource/g62h-syeh.csv", stringsAsFactors = FALSE)
+
+hosp_capacity<-beds_raw  %>% dplyr::select(state, date, inpatient_beds) %>% mutate(date=as.Date(date), state=tolower(state), year=year(date)) %>%
+  mutate(season= case_when(date>="2022-10-08" & date<"2023-10-07" ~ "2022-2023",
+                           date>="2023-10-07" & date< "2024-10-04" ~ "2023-2024",
+                           TRUE ~ NA)) %>%
+           drop_na(season) %>%
+           group_by(state, season) %>% summarize(inpatient_beds=mean(inpatient_beds, na.rm=TRUE))%>%
+           rename(location=state)
+
+ write_csv(hosp_capacity, "data/hosp_capacity.csv")
+
+```
+
+
+## Load number of facilities
+Warning: This pull takes a really long time to run. Instead, it's recommend to load locally stored summary file in `\data`.
+
+```{r num-facilities}
+
+HHS_actuals_facility_raw <- read.socrata("https://healthdata.gov/resource/anag-cw7u.csv", stringsAsFactors = FALSE)
+num_facilities<- HHS_actuals_facility_raw %>% select(hospital_pk, state, collection_week) %>% mutate(date=as.Date(collection_week), state=tolower(state)) %>%
+  mutate(season= case_when(date>="2022-10-08" & date<"2023-10-07" ~ "2022-2023",
+                           date>="2023-10-07" & date< "2024-10-04" ~ "2023-2024",
+                           TRUE ~ NA)) %>%
+           drop_na(season) %>%
+           group_by(state, season, date) %>% summarize(num_facilities=length(unique(hospital_pk))) %>%
+           group_by(state, season) %>% summarize(median_facilities=median(num_facilities, na.rm=TRUE)) %>%
+           rename(location=state)
+ write_csv(num_facilities, "data/num_facilities.csv")
+
+```
+
+
+## Hospitalization data
+
+### State & National COVID & Influenza Hospital Admission Data
+Pull in state and national hospitalization NHSN admissions data for COVID-19 and influenza using Delphi's API.
+https://cmu-delphi.github.io/delphi-epidata/
+
+```{r load-data, class.source = 'fold-hide'}
+#options(covidcast.auth = "####") #if you register with covidcast
+
+hosp_covid <-covidcast_signal(data_source = "hhs",
+                          signal = "confirmed_admissions_covid_1d",
+                          start_day = "2020-01-01", end_day = Sys.Date(), geo_type=c("state"))
+
+hosp_covid_us <-covidcast_signal(data_source = "hhs",
+                          signal = "confirmed_admissions_covid_1d",
+                          start_day = "2020-01-01", end_day = Sys.Date(), geo_type=c("nation"))
+
+hosp_flu <-covidcast_signal(data_source = "hhs",
+                          signal = "confirmed_admissions_influenza_1d",
+                          start_day = "2022-02-02", end_day = Sys.Date(), geo_type=c("state"))
+
+hosp_flu_us <-covidcast_signal(data_source = "hhs",
+                          signal = "confirmed_admissions_influenza_1d",
+                          start_day = "2022-02-02", end_day = Sys.Date(), geo_type=c("nation"))
+
+
+hosp_epi_df <- hosp_covid %>% 
+  bind_rows(hosp_covid_us) %>%
+  dplyr::select(geo_value, time_value, value) %>%
+  filter(geo_value %notin% c("gu", "vi", "as", "pr")) %>% #exclude territories
+  left_join(state_census %>% dplyr::select(pop, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "geo_value") %>%
+  arrange(time_value, geo_value) %>%
+  group_by(geo_value)%>%
+  mutate(weekly_admits=zoo::rollsum(value, k = 7, align = "right", fill = NA)) %>% #create weekly hospital admissions from daily values (7-day rolling sum)
+  mutate(weekly_admits_p100K = weekly_admits / pop * 100000) %>%  # convert to hosp / 100K pop
+  drop_na(weekly_admits) %>% 
+  filter(time_value<="2024-04-30") %>%
+  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits, weekly_admits_p100K) %>%
+  as_epi_df(.,
+  geo_type = "state",
+  time_type = "day",
+  as_of = max(hosp_covid$issue)) 
+
+
+hosp_epi_df %>% ggplot(aes(time_value, weekly_hosp))+ 
+  geom_line() + 
+  facet_wrap(geo_value ~., scales="free") + 
+  theme_classic()+
+  ggtitle("COVID Weekly Hospitalizations per 100K")
+
+hosp_epi_df_raw <- hosp_covid %>% 
+  bind_rows(hosp_covid_us) %>%
+  dplyr::select(geo_value, time_value, value) %>%
+  filter(geo_value %notin% c("gu", "vi", "as", "pr")) %>%  #exclude territories
+  left_join(state_census %>% dplyr::select(pop, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "geo_value") %>%
+  arrange(time_value, geo_value) %>%
+  group_by(geo_value)%>%
+  mutate(weekly_admits=value) %>% #create weekly hospital admissions from daily values (7-day rolling sum)
+  drop_na(weekly_admits) %>% 
+  filter(time_value<="2024-04-30") %>%
+  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits) %>%
+  as_epi_df(.,
+  geo_type = "state",
+  time_type = "day",
+  as_of = max(hosp_covid$issue)) 
+
+
+hosp_epi_df_flu <- hosp_flu %>% 
+  bind_rows(hosp_flu_us) %>%
+  dplyr::select(geo_value, time_value, value) %>%
+  filter(geo_value %notin% c("gu", "vi", "as", "pr")) %>% #exclude territories
+  left_join(state_census %>% dplyr::select(pop, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "geo_value") %>%
+  arrange(time_value, geo_value) %>%
+  group_by(geo_value)%>%
+  mutate(weekly_admits=zoo::rollsum(value, k = 7, align = "right", fill = NA)) %>% #create weekly hospital admissions from daily values (7-day rolling sum)
+  mutate(weekly_admits_p100K= weekly_admits / pop * 100000) %>%  # convert to hosp / 100K pop
+  drop_na(weekly_admits) %>% 
+  filter(time_value<="2024-04-30") %>%
+  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits, weekly_admits_p100K) %>%
+  as_epi_df(.,
+  geo_type = "state",
+  time_type = "day",
+  as_of = max(hosp_flu$issue)) 
+
+
+hosp_epi_df_flu %>% ggplot(aes(time_value, weekly_hosp))+ geom_line() + facet_wrap(geo_value ~., scales="free") + theme_classic()+ 
+  ggtitle("Influenza Weekly Hospitalizations per 100K")
+
+```
+
+#### Check/correct for any missingness in data
+
+COVID state level doesn't appear to have any missingness. Missing a couple days for a few states for influenza. Fill in those values with 0s. 
+
+
+```{r missingness, class.source = 'fold-hide'}
+
+
+covid_hosp_full <- hosp_epi_df %>%
+  complete(time_value = full_seq(time_value, 1)) %>%
+  group_by(geo_value) %>%
+  arrange(time_value) %>% # possibly unnecessary, but good insurance
+  tidyr::fill(weekly_hosp) %>% # first, try locf
+  mutate(weekly_hosp = replace_na(weekly_hosp, 0)) %>%
+  tidyr::fill(weekly_admits_p100K) %>% # first, try locf
+  mutate(weekly_admits_p100K = replace_na(weekly_admits_p100K, 0)) %>%
+  ungroup()
+
+covid_hosp_full_raw <- hosp_epi_df_raw  %>%
+  complete(time_value = full_seq(time_value, 1)) %>%
+  group_by(geo_value) %>%
+  arrange(time_value) %>% # possibly unnecessary, but good insurance
+  tidyr::fill(weekly_hosp) %>% # first, try locf
+  mutate(weekly_hosp = replace_na(weekly_hosp, 0)) %>%
+  ungroup()
+
+flu_hosp_full <- hosp_epi_df_flu %>%
+  complete(time_value = full_seq(time_value, 1)) %>%
+  group_by(geo_value) %>%
+  arrange(time_value) %>% # possibly unnecessary, but good insurance
+  tidyr::fill(weekly_hosp) %>% # first, try locf
+  mutate(weekly_hosp = replace_na(weekly_hosp, 0)) %>%
+  tidyr::fill(weekly_admits_p100K) %>% # first, try locf
+  mutate(weekly_admits_p100K = replace_na(weekly_admits_p100K, 0)) %>%
+  ungroup()
+
+
+write_csv(covid_hosp_full, "data/covid_hosp.csv")
+write_csv(flu_hosp_full, "data/flu_hosp.csv")
+```
+
+### Total season burden
+
+```{r season-burden}
+covid_burden<-hosp_covid %>% bind_rows(hosp_covid_us) %>%
+  dplyr::select(state=geo_value, time_value, value) %>%
+  mutate(season= case_when(time_value>="2022-10-08" & time_value<"2023-10-07" ~ "2022-2023",
+                           time_value>="2023-10-07" & time_value< "2024-10-04" ~ "2023-2024",
+                           TRUE ~ NA)) %>%
+           drop_na(season) %>%
+           group_by(state, season) %>% summarize(burden=sum(value, na.rm=TRUE))%>%
+           rename(location=state) %>%
+  mutate(disease="COVID-19")
+
+
+flu_burden<-hosp_flu %>% bind_rows(hosp_flu_us) %>%
+  dplyr::select(state=geo_value, time_value, value) %>%
+  mutate(season= case_when(time_value>="2022-10-08" & time_value<"2023-10-07" ~ "2022-2023",
+                           time_value>="2023-10-07" & time_value< "2024-10-04" ~ "2023-2024",
+                           TRUE ~ NA)) %>%
+           drop_na(season) %>%
+           group_by(state, season) %>% summarize(burden=sum(value, na.rm=TRUE))%>%
+           rename(location=state) %>%
+  mutate(disease="Influenza")
+
+seasonal_burden <- covid_burden %>% bind_rows(flu_burden)
+write_csv(seasonal_burden, "data/seasonal_burden.csv")
+
+
+```
+
+### County-level hospitalizations
+
+Import county-level hospitalizations via publicly available NHSN facilities data. 
+https://healthdata.gov/Hospital/COVID-19-Reported-Patient-Impact-and-Hospital-Capa/anag-cw7u/about_data
+
+Read in weekly county actuals at facility level; filter to `state == CA`
+
+```{r load-nhsn}
+
+# HHS_actuals_facility_raw <- read.socrata("https://healthdata.gov/resource/anag-cw7u.csv?state=CA", stringsAsFactors = FALSE) 
+# 
+# nhsn_county<- HHS_actuals_facility_raw %>% 
+#   mutate(date=as.Date(collection_week)-1) %>%
+#   left_join(county_fips, by = c(fips_code = "county_fips")) %>% 
+#   dplyr::select(date, county, previous_day_admission_adult_covid_confirmed_7_day_sum, previous_day_admission_pediatric_covid_confirmed_7_day_sum, previous_day_admission_influenza_confirmed_7_day_sum) %>% 
+#   mutate(across(!c(date, county), ~na_if(., -999999))) %>% #convert censored values to NAs
+#   mutate(across(!c(date, county), ~replace_na(., 0))) %>% #convert NAs to zeros
+#   arrange(county, date) %>%
+#   group_by(county, date) %>% 
+#   summarize(weekly_flu_admits= sum(previous_day_admission_influenza_confirmed_7_day_sum, na.rm=FALSE),
+#             weekly_covid_admits= sum(previous_day_admission_adult_covid_confirmed_7_day_sum + previous_day_admission_pediatric_covid_confirmed_7_day_sum, na.rm=FALSE)) %>%  #sum from facility to county level
+#   left_join(counties %>% dplyr::select(pop=dof_pop_county, county), by="county") %>% 
+#   mutate(covid_weekly_admits_p100k= weekly_covid_admits/pop*100000,
+#          flu_weekly_admits_p100k=weekly_flu_admits/pop*100000) %>%
+#   arrange(county, date) %>%
+#   ungroup() %>%
+#   rename(location=county)
+# 
+# 
+# hosp_epi_df_county <- nhsn_county %>% dplyr::select(geo_value=location, time_value=date, weekly_hosp=weekly_covid_admits) %>%
+#   drop_na(weekly_hosp, geo_value) %>% 
+#   as_epi_df(.,
+#   geo_type = "county",
+#   time_type = "day",
+#   as_of = Sys.Date()) 
+# 
+# hosp_epi_df_county_flu <- nhsn_county %>% dplyr::select(geo_value=location, time_value=date, weekly_hosp=weekly_flu_admits) %>%
+#   drop_na(weekly_hosp, geo_value) %>% 
+#   as_epi_df(.,
+#   geo_type = "county",
+#   time_type = "day",
+#   as_of = Sys.Date()) 
+# 
+# write_csv(hosp_epi_df_county, "data/covid_hosp_county.csv")
+# write_csv(hosp_epi_df_county_flu, "data/flu_hosp_county.csv")
+
+```
+
+## Forecast Actuals for Scoring
+
+### FluSight actuals (weekly)
+
+Truth data/actuals for scoring forecasts imported from FluSight.
+
+```{r flusight-actuals}
+grab_CDC_actuals<-function(){
+  library(httr)
+  req <- GET("https://api.github.com/repos/cdcepi/FluSight-forecast-hub/git/trees/main?recursive=1")
+  httr::stop_for_status(req)
+  filelist <- unlist(lapply(content(req)$tree, "[", "path"), use.names = F)
+  filelist <- grep(".csv", filelist, value = TRUE, fixed = TRUE)
+  actuals<-grep("target-hospital-admissions.csv", filelist, value = TRUE, fixed = TRUE)
+  file_path <- paste0("https://raw.githubusercontent.com/cdcepi/FluSight-forecast-hub/main/",actuals)
+
+  temp <- tempfile()
+  download.file(gsub(" ", "%20", file_path), temp)
+  all_data  <- read.csv(temp) %>% data.table() #%>%
+  return(all_data)
+}
+
+CDC_actuals_raw<-grab_CDC_actuals() %>% mutate(scenario="Actuals") %>% mutate(target_end_date=as.Date(date))
+write_csv(CDC_actuals_raw, "data/CDC_actuals_raw.csv")
+```
+
+### COVID Forecast Hub actuals (weekly)
+
+Truth data/actuals for scoring forecasts imported from COVID Forecast Hub.
+
+```{r covid-forecast-hub-actuals}
+
+COVID_actuals_raw<- read_csv("https://media.githubusercontent.com/media/reichlab/covid19-forecast-hub/master/data-truth/truth-Incident%20Hospitalizations.csv") %>% 
+  left_join(state_census %>% dplyr::select(pop, location_name=name, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "location_name") %>%
+  dplyr::select(target_end_date=date, location, location_name, geo_value, true_value=value) %>%
+  mutate(geo_value = case_when(location_name=="Puerto Rico" ~ "pr",
+                              location_name=="US" ~"us",
+                              TRUE ~ geo_value)) 
+
+COVID_actuals_weekly<- COVID_actuals_raw %>%
+  mutate(MMWR_week=MMWRweek(target_end_date)$MMWRweek, MMWR_year=MMWRweek(target_end_date)$MMWRyear) %>%
+  group_by(MMWR_week, MMWR_year, location, location_name, geo_value)%>%
+  summarize(true_value=sum(true_value)) %>%
+  mutate(target_end_date=MMWRweek2Date(MMWR_year, MMWR_week))
+  
+write_csv(COVID_actuals_weekly, "data/COVID_actuals_weekly.csv")
+  
+```
+
+
+## Import CDC FluSight baseline 2022-2023 & 2023-2024
+
+
+```{r flusight}
+read_CDC_flu_forecasts22 <- function(file_path){
+
+    # file_path <- filelist[[1]]
+    test<-strsplit(file_path, "data-forecasts/")[[1]][2]
+    scenario<-strsplit(test,"/",fixed=FALSE)[[1]][1]
+
+  temp <- tempfile()
+  download.file(gsub(" ", "%20", file_path), temp)
+  all_data  <- read.csv(temp) %>% data.table() #%>%
+  unlink(temp)
+
+  foo <- all_data %>% mutate(scenario :=scenario)
+  return(foo)
+}
+
+read_CDC_flu_forecasts23 <- function(file_path){
+
+    # file_path <- filelist[[1]]
+    test<-strsplit(file_path, "model-output/")[[1]][2]
+    scenario<-strsplit(test,"/",fixed=FALSE)[[1]][1]
+
+  temp <- tempfile()
+  download.file(gsub(" ", "%20", file_path), temp)
+  all_data  <- read.csv(temp) %>% data.table() #%>%
+  unlink(temp)
+
+  foo <- all_data %>% mutate(scenario :=scenario)
+  return(foo)
+}
+
+grab_CDC_ensemble22<-function(){
+  library(httr)
+  req <- GET("https://api.github.com/repos/cdcepi/Flusight-forecast-data/git/trees/master?recursive=1")
+  httr::stop_for_status(req)
+  filelist <- unlist(lapply(content(req)$tree, "[", "path"), use.names = F)
+  filelist <- grep(".csv", filelist, value = TRUE, fixed = TRUE)
+  ensemble<-grep("data-forecasts/Flusight-ensemble", filelist, value = TRUE, fixed = TRUE)
+  baseline<-grep("data-forecasts/Flusight-baseline", filelist, value = TRUE, fixed = TRUE)
+  CMU<-grep("data-forecasts/CMU-TimeSeries", filelist, value = TRUE, fixed = TRUE)
+  UMass<-grep("data-forecasts/UMass-trends_ensemble", filelist, value = TRUE, fixed = TRUE)
+  CEPH<-grep("data-forecasts/CEPH-Rtrend_fluH", filelist, value = TRUE, fixed = TRUE)
+  MOBS<-grep("data-forecasts/MOBS-GLEAM_FLUH", filelist, value = TRUE, fixed = TRUE)
+  PSI<-grep("data-forecasts/PSI-DICE", filelist, value = TRUE, fixed = TRUE)
+  SGroup<-grep("data-forecasts/SGroup-RandomForest", filelist, value = TRUE, fixed = TRUE)
+
+
+  filelist <- lapply(c(ensemble, baseline, CMU, UMass, CEPH, MOBS, PSI, SGroup), function(x)  paste0("https://raw.githubusercontent.com/cdcepi/Flusight-forecast-data/master/",x))
+
+  df <- data.table::rbindlist(lapply(filelist, read_CDC_flu_forecasts22), fill=TRUE)
+
+
+  return(df)
+}
+
+
+
+grab_CDC_ensemble23<-function(date="2022-01-24"){
+  library(httr)
+  req <- GET("https://api.github.com/repos/cdcepi/FluSight-forecast-hub/git/trees/main?recursive=1")
+  httr::stop_for_status(req)
+  filelist <- unlist(lapply(content(req)$tree, "[", "path"), use.names = F)
+  filelist <- grep(".csv", filelist, value = TRUE, fixed = TRUE)
+  ensemble<-grep("model-output/FluSight-ensemble", filelist, value = TRUE, fixed = TRUE)
+  baseline<-grep("model-output/FluSight-baseline", filelist, value = TRUE, fixed = TRUE)
+  CMU<-grep("model-output/CMU-TimeSeries", filelist, value = TRUE, fixed = TRUE)
+  UMass<-grep("model-output/UMass-trends_ensemble", filelist, value = TRUE, fixed = TRUE)
+  CEPH<-grep("model-output/CEPH-Rtrend_fluH", filelist, value = TRUE, fixed = TRUE)
+  MOBS<-grep("model-output/MOBS-GLEAM_FLUH", filelist, value = TRUE, fixed = TRUE)
+  PSI<-grep("model-output/PSI-DICE", filelist, value = TRUE, fixed = TRUE)
+  SGroup<-grep("model-output/SGroup-RandomForest", filelist, value = TRUE, fixed = TRUE)
+
+   filelist <- lapply(c(ensemble, baseline, CMU, UMass, CEPH, MOBS, PSI, SGroup), function(x) paste0("https://raw.githubusercontent.com/cdcepi/FluSight-forecast-hub/main/",x))
+
+
+  df <- data.table::rbindlist(lapply(filelist, read_CDC_flu_forecasts23), fill=TRUE)
+
+  return(df)
+}
+
+
+FluSight_ensemble22<-grab_CDC_ensemble22()
+FluSight_ensemble23<-grab_CDC_ensemble23()
+
+```
+
+
+
+## Import COVID Forecast Hub Forecasts
+From: https://github.com/reichlab/covid19-forecast-hub
+
+```{r covid-hub}
+
+read_covid_forecasts<- function(file_path){
+
+    # file_path <- filelist[[1]]
+    test<-strsplit(file_path, "data-processed/")[[1]][2]
+    model<-strsplit(test,"/",fixed=FALSE)[[1]][1]
+
+  temp <- tempfile()
+  download.file(gsub(" ", "%20", file_path), temp)
+  all_data  <- read.csv(temp) %>% data.table() #%>%
+  unlink(temp)
+
+  foo <- all_data %>% mutate(model :=model)
+  return(foo)
+}
+
+grab_covid_models<-function(){
+  library(httr)
+  req <- GET("https://api.github.com/repos/reichlab/covid19-forecast-hub/git/trees/master?recursive=1")
+  httr::stop_for_status(req)
+  filelist <- unlist(lapply(content(req)$tree, "[", "path"), use.names = F)
+  filelist <- grep(".csv", filelist, value = TRUE, fixed = TRUE)
+  filelist22 <- grep("2022", filelist, value = TRUE, fixed = TRUE)
+  filelist23 <- grep("2023", filelist, value = TRUE, fixed = TRUE)
+  filelist24 <- grep("2024", filelist, value = TRUE, fixed = TRUE)
+  filelist<-c(filelist22, filelist23, filelist24)
+  ensemble<-grep("data-processed/COVIDhub-4_week_ensemble", filelist, value = TRUE, fixed = TRUE)
+  baseline<-grep("data-processed/COVIDhub-baseline", filelist, value = TRUE, fixed = TRUE)
+  CMU<-grep("data-processed/CMU-TimeSeries", filelist, value = TRUE, fixed = TRUE)
+  UMass<-grep("data-processed/UMass-trends_ensemble", filelist, value = TRUE, fixed = TRUE)
+  CEPH<-grep("data-processed/CEPH-Rtrend_covid", filelist, value = TRUE, fixed = TRUE)
+  MOBS<-grep("data-processed/MOBS-GLEAM_COVID", filelist, value = TRUE, fixed = TRUE)
+  PSI<-grep("data-processed/PSI-DICE", filelist, value = TRUE, fixed = TRUE)
+  SGroup<-grep("data-processed/SGroup-RandomForest", filelist, value = TRUE, fixed = TRUE)
+
+   filelist <- lapply(c(ensemble, baseline, CMU, UMass, CEPH, MOBS, PSI, SGroup), function(x) paste0("https://raw.githubusercontent.com/reichlab/covid19-forecast-hub/refs/heads/master/",x))
+
+
+  df <- data.table::rbindlist(lapply(filelist, read_covid_forecasts), fill=TRUE)
+
+  return(df)
+}
+
+COVID_hub_files<-grab_covid_models()
+
+
+
+# format/standardize for scoring
+COVIDHub_combo<- COVID_hub_files %>% 
+  filter(grepl("inc hosp", target), forecast_date >=season22_start, type=="quantile") %>%
+  mutate(season= case_when(target_end_date>=season22_start & target_end_date<season23_start ~ "2022-2023",
+                           target_end_date>=season23_start & target_end_date< season24_end ~ "2023-2024",
+                           TRUE ~ NA)) %>%
+           drop_na(season) %>%
+  mutate(target_end_date=as.Date(target_end_date), forecast_date=as.Date(forecast_date)) %>%
+  rename(prediction=value) %>%
+  left_join(COVID_actuals_raw, by=c("location", "target_end_date")) %>%
+  separate_wider_delim(target, delim = "day ahead inc hosp", names=c('horizon', 'target')) %>% 
+  mutate(horizon=as.numeric(horizon)) %>%
+  filter(horizon %in% c(7, 14, 21, 28)) %>%
+   mutate(model= case_when(model=="COVIDhub-baseline"~ "Baseline",
+                          model=="COVIDhub-4_week_ensemble"~ "Ensemble",
+                          TRUE ~ model))%>%
+  mutate(horizon=horizon/7, target="wk inc hosp", disease="COVID-19", true_value=log(true_value+1), prediction= log(prediction +1)) %>%
+  #mutate(horizon=horizon/7, target="wk inc hosp", disease="COVID-19") %>%
+  dplyr::select(-location, -location_name, -type) %>%
+  rename(location=geo_value)
+
+# check_forecasts(Hub_ensemble)
+# find_duplicates(Hub_ensemble)
+# avail_forecasts(Hub_ensemble, by = c("model", "target", "location"))
+# 
+# prelim_scores_covid<-score(Hub_ensemble)
+```
+
+### Format forecasts for scoring
+```{r format-forecasts}
+CDC_actuals<- CDC_actuals_raw %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, location_name=NAME, geo_value=ABBR) %>% mutate(geo_value=tolower(geo_value)), by = "location_name") %>%
+  dplyr::select(target_end_date, location, location_name, geo_value, value) %>%
+  mutate(geo_value = case_when(location_name=="Puerto Rico" ~ "pr",
+                              location_name=="US" ~"us",
+                              TRUE ~ geo_value))
+
+FluSight22<-FluSight_ensemble22 %>% 
+  filter(scenario %in% c("Flusight-ensemble", "Flusight-baseline", "CMU-TimeSeries", "UMass-trends_ensemble", "CEPH-Rtrend_fluH", "MOBS-GLEAM_FLUH", "PSI-DICE", "SGroup-RandomForest" ), type=="quantile") %>%
+  rename(prediction=value, model=scenario) %>% 
+  mutate(target_end_date=as.Date(target_end_date), forecast_date=as.Date(forecast_date)) %>%
+  filter(target_end_date>=season22_start & target_end_date<season23_start) %>%
+  left_join(CDC_actuals, by=c("target_end_date", "location")) %>%
+  # mutate(geo_value=replace_na(geo_value,"us"))%>%
+  dplyr::select(-type, -location, -location_name) %>% 
+  rename(true_value=value, location=geo_value) %>%
+  separate_wider_delim(target, delim = "wk ahead inc flu hosp", names=c('horizon', 'target')) %>%
+  mutate(horizon=as.integer(horizon), target="wk inc hosp", season="2022-2023", true_value=log(true_value+1), prediction= log(prediction +1)) %>%
+  #mutate(horizon=as.integer(horizon), target="wk inc hosp", season="2022-2023") %>%
+  mutate(model= case_when(model=="Flusight-baseline"~ "Baseline",
+                          model=="Flusight-ensemble"~ "Ensemble",
+                          model=="CEPH-Rtrend_fluH" ~ "CEPH-Rtrend",
+                          model=="MOBS-GLEAM_FLUH" ~ "MOBS-GLEAM",
+                          TRUE ~ model))%>%
+  drop_na(true_value) %>%
+  distinct()
+
+
+FluSight23<-FluSight_ensemble23 %>% 
+  filter(scenario %in% c("FluSight-ensemble", "FluSight-baseline", "CMU-TimeSeries", "UMass-trends_ensemble", "CEPH-Rtrend_fluH", "MOBS-GLEAM_FLUH", "PSI-DICE", "SGroup-RandomForest"), output_type=="quantile") %>%
+  mutate(output_type_id=as.numeric(as.character(output_type_id)), target="wk inc hosp") %>%
+  rename(prediction=value, model=scenario) %>% 
+  mutate(target_end_date=as.Date(target_end_date), forecast_date=as.Date(reference_date)) %>%
+  filter(target_end_date>=season23_start & target_end_date< season24_end) %>%
+  left_join(CDC_actuals, by=c("target_end_date", "location")) %>%
+  filter(horizon >=0) %>% 
+  # mutate(geo_value=replace_na(geo_value,"us"))%>%
+  dplyr::select(-output_type, -reference_date, -location, -location_name) %>% 
+  rename(quantile=output_type_id, true_value=value, location=geo_value) %>%
+  mutate(season="2023-2024", true_value=log(true_value+1), prediction= log(prediction +1)) %>%
+ mutate(model= case_when(model=="FluSight-baseline"~ "Baseline",
+                          model=="FluSight-ensemble"~ "Ensemble",
+                          model=="CEPH-Rtrend_fluH" ~ "CEPH-Rtrend",
+                          model=="MOBS-GLEAM_FLUH" ~ "MOBS-GLEAM",
+                          TRUE ~ model))%>%
+  #mutate(season="2023-2024") %>%
+  drop_na(true_value) %>%
+  distinct()
+
+FluSight<- FluSight22 %>% bind_rows(FluSight23) %>% mutate(disease="Influenza")
+comb_fc<-FluSight %>% bind_rows(COVIDHub_combo)
+write_csv(comb_fc, "data/raw_forecasts.csv")
+arrow::write_parquet(comb_fc, "data/raw_forecasts.gz. parquet", compression = "gzip", compression_level = 9)
+
+
+# alternative for when saving MMWR season dates
+# write_csv(comb_fc, "data/raw_forecasts_MMWRseason.csv")
+# arrow::write_parquet(comb_fc, "data/raw_forecasts_MMWRseason.gz.parquet", compression = "gzip", compression_level = 9)
+
+```
+
+
+## Session Info
+```{r session-info}
+sessionInfo()
+```

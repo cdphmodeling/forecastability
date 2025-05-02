@@ -1,0 +1,491 @@
+---
+title: "Generate Figures and Tables"
+author: "Lauren White (lauren.white@cdph.ca.gov)"
+date: '2024-12-05'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+Code to reproduce figure and table results in manuscripts. Can be run sequentially after `load_data.R`, `calculate_forecastability.Rmd`, and `forecast_eval.Rmd` or as a standalone using output already saved locally to the `/results` folder for convenience.
+
+## Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+library(MetBrewer)
+library(readr)
+library(cowplot)
+library(tidyr)
+library(purrr)
+library(segmented)
+library(astsa)
+library(ForeCA)
+library(forecast)
+
+`%notin%` <- Negate(`%in%`)
+```
+
+### Settings for `foreCA` `Omega` function
+```{r}
+# spectrum control
+sc <- list(method = "mvspec")
+
+# entropy control
+ec <- list(prior.weight = 1e-2)
+
+confidence<-0.05
+```
+
+### Load forecastability data frame
+(if not already loaded in environment from running other Rmd scripts)
+```{r}
+if(!exists("forecastability")) {
+  forecastability<-read_csv("results/forecastability_results.csv")
+}
+
+if(!exists("combo")) {
+  combo<-read_csv("results/combo_omega.csv")
+}
+
+if(!exists("hcai_combined")) {
+  hcai_combined<-read_csv("results/hcai_combined.csv")
+}
+
+if(!exists("hcai_state_omega")) {
+  hcai_state_omega<-read_csv("results/hcai_state_omega.csv")
+}
+
+if(!exists("hcai_burden")) {
+  hcai_burden<-read_csv("results/hcai_burden.csv")
+}
+
+if(!exists("state_covid_cadence")) {
+  state_covid_cadence<-read_csv("results/state_covid_cadence.csv")
+}
+
+if(!exists("state_flu_cadence")) {
+  state_flu_cadence<-read_csv("results/state_flu_cadence.csv")
+}
+
+if(!exists("flu_subtypes")) {
+flu_subtypes<-read_csv("data/CDPH_flu_subtypes.csv") %>% rename(season=Season)
+}
+
+if(!exists("covid_hosp_full")) {
+covid_hosp_full<-read_csv("data/covid_hosp.csv") 
+}
+
+if(!exists("flu_hosp_full")) {
+flu_hosp_full<-read_csv("data/flu_hosp.csv") 
+}
+```
+
+
+### Predefine color palettes
+```{r color-palettes}
+
+col_diseases<-met.brewer("Hiroshige",2)
+
+col_models<-met.brewer("Cassatt1",2)
+
+col_season<-met.brewer("Hokusai1",6)
+names(col_season)<-c("2017-2018", "2018-2019", "2019-2020", "2021-2022", "2022-2023", "2023-2024") 
+
+col_subtype<-met.brewer("Isfahan2", 4)
+                     
+```
+
+
+## Figure 1
+https://stackoverflow.com/questions/61761976/plotting-multiple-acf-with-ggplot
+```{r fig1}
+set.seed(1234)
+flu_ts<-flu_hosp_full%>% filter(geo_value=="us") %>% 
+  arrange(time_value) %>%
+  mutate(days= time_value-as.Date("2022-02-02")) 
+flu_ts_state<-flu_hosp_full %>% filter(geo_value=="md") %>% 
+  arrange(time_value) %>%
+  mutate(days= time_value-as.Date("2022-02-02")) 
+
+flu_ts %>% 
+    pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
+flu_ts %>% 
+    pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
+
+flu_ts_state%>% 
+    pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
+flu_ts_state%>% 
+    pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
+
+covid_ts<-covid_hosp_full %>% filter(geo_value=="us") %>% mutate(days= time_value-as.Date("2022-02-02")) %>% filter(days>=0)
+
+flu_ts<- flu_ts %>% mutate(weekly_hosp_lag= weekly_hosp-lag(weekly_hosp)) %>% 
+  mutate(weekly_hosp_lag2= weekly_hosp_lag-lag(weekly_hosp_lag)) %>% 
+  drop_na()
+
+
+flu_ts_state<-flu_ts_state %>% mutate(weekly_hosp_lag= weekly_hosp-lag(weekly_hosp)) %>%
+  mutate(weekly_hosp_lag2= weekly_hosp_lag-lag(weekly_hosp_lag)) %>% 
+  drop_na()
+
+fore_flu<- as.numeric(Omega(flu_ts$weekly_hosp_lag, spectrum.control = sc, entropy.control = ec))
+fore_flu_state<- as.numeric(Omega(flu_ts_state$weekly_hosp_lag, spectrum.control = sc, entropy.control = ec))
+
+fore_covid<- combo %>% filter(season=="2022-2024", disease=="COVID-19", location=="us") %>% pull(omega)
+
+#Random ts
+days<-seq(1,nrow(flu_ts), by=1)
+y<-rnorm(length(days),mean=1,sd=10)
+random_ts<- data.frame(days,y)
+random_ts %>%     
+  pull(y) %>% ndiffs(test="kpss", alpha=confidence)
+random_ts %>%     
+  pull(y) %>% ndiffs(test="adf", alpha=confidence)
+random_ts<- random_ts %>% mutate(lag_y= y-lag(y)) %>% 
+  mutate(lay_y=lag_y-lag(lag_y)) %>% drop_na()
+
+
+fore_rand<-as.numeric(Omega(random_ts$lag_y, spectrum.control = sc, entropy.control = ec))
+
+
+Fig1A<- random_ts %>% ggplot(aes(days,y)) + geom_line() + theme_classic()+ ggtitle("Signal") +xlab("")+ylab("")
+rand_acf<- data.frame(lag=acf(random_ts$y, main="", lag.max=365)$lag, acf=acf(random_ts$y, main="",lag.max=365)$acf) %>% filter(lag%%14 == 0)
+Fig1B<- rand_acf %>% ggplot(aes(x=lag, y=acf)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+          geom_point()+ theme_classic() + ggtitle("Autocorrelation") +xlab("")+ylab("")
+rand_spec<-data.frame(freq=mvspec(random_ts$y, log="no")$freq, spec= mvspec(random_ts$y, log="no")$spec) %>% 
+  filter(freq<=0.025)
+
+Fig1C<- rand_spec %>% ggplot(aes(x=freq, y=spec)) + geom_line() + theme_classic()+
+  annotate(geom="text", x=0.02, y=250, label=paste(round(fore_rand,2),"%"),
+              color="red")+
+  ggtitle("Spectral Density") +xlab("")+ylab("")
+
+# cowplot::plot_grid(A, B, C, ncol=1, label="AUTO")
+
+
+#Flu state ts
+Fig1D<- flu_ts_state %>% ggplot(aes(days, weekly_admits_p100K)) + geom_line()+ theme_classic() +xlab("")+ylab("")
+#acf(flu_ts_state$weekly_admits_p100K, main="")
+covid_acf<- data.frame(lag=acf(flu_ts_state$weekly_admits_p100K, lag.max=365)$lag, acf=acf(flu_ts_state$weekly_admits_p100K, lag.max=365)$acf) %>% filter(lag%%14 == 0)
+Fig1E<- covid_acf %>% ggplot(aes(x=lag, y=acf)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+          geom_point()+ theme_classic() +xlab("")+ylab("")
+flu_state_spec<- data.frame(freq=mvspec(flu_ts_state$weekly_admits_p100K, log="no")$freq, spec= mvspec(flu_ts_state$weekly_admits_p100K, log="no")$spec) %>% 
+  filter(freq<=0.025)
+Fig1F<- flu_state_spec %>% ggplot(aes(x=freq, y=spec)) + geom_line() + theme_classic()+
+  annotate(geom="text", x=0.02, y=200, label=paste(round(fore_flu_state,2),"%"),
+              color="red") +
+  xlab("")+ylab("")
+
+
+#Flu ts  
+Fig1G<- flu_ts %>% ggplot(aes(days, weekly_admits_p100K)) + geom_line()+ theme_classic() +xlab("")+ylab("")
+#acf(flu_ts$weekly_admits_p100K, main="")
+flu_acf<- data.frame(lag=acf(flu_ts$weekly_admits_p100K, lag.max=365)$lag, acf=acf(flu_ts$weekly_admits_p100K, lag.max=365)$acf) %>% filter(lag%%14 == 0)
+Fig1H<- flu_acf %>% ggplot(aes(x=lag, y=acf)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+          geom_point()+ theme_classic() +xlab("")+ylab("")
+flu_spec<- data.frame(freq=mvspec(flu_ts$weekly_admits_p100K, log="no")$freq, spec= mvspec(flu_ts$weekly_admits_p100K, log="no")$spec) %>% 
+  filter(freq<=0.025)
+Fig1I<- flu_spec %>% ggplot(aes(x=freq, y=spec)) + geom_line() + theme_classic()+
+  annotate(geom="text", x=0.02, y=300, label=paste(round(fore_flu,2),"%"),
+              color="red") + 
+  xlab("")+ylab("")
+
+#Sine ts
+sine_ts<- data.frame(days, y= sin(0.05*days))
+sine_ts %>%     
+  pull(y) %>% ndiffs(test="kpss", alpha=confidence)
+sine_ts %>%     
+  pull(y) %>% ndiffs(test="adf", alpha=confidence)
+sine_ts<- sine_ts %>% mutate(lag_y= y-lag(y)) %>%
+   mutate(lag_y= lag_y-lag(lag_y)) %>% drop_na()
+
+fore_sine<- as.numeric(Omega(sine_ts$lag_y, spectrum.control = sc, entropy.control = ec))
+
+Fig1J<- sine_ts %>% ggplot(aes(days,y)) + geom_line() + theme_classic() +xlab("Days")+ylab("")
+acf(sine_ts$y, main="")
+mvspec(sine_ts$y, log="no")
+sine_acf<- data.frame(lag=acf(sine_ts$y, lag.max=365)$lag, acf=acf(sine_ts$y, lag.max=365)$acf) %>% filter(lag%%14 == 0)
+
+Fig1K<- sine_acf %>% ggplot(aes(x=lag, y=acf)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+          geom_point()+ theme_classic() + xlab("Lag (Days)") + ylab("")
+sine_spec<- data.frame(freq=mvspec(sine_ts$y, log="no")$freq, spec= mvspec(sine_ts$y, log="no")$spec) %>% 
+  filter(freq<=0.025)
+Fig1L<- sine_spec %>% ggplot(aes(x=freq, y=spec)) + geom_line() + theme_classic()+
+  annotate(geom="text", x=0.02, y=60, label=paste(round(fore_sine,2),"%"),
+              color="red")+
+  xlab("Frequency")+ylab("")
+
+cowplot::plot_grid(Fig1A, Fig1B, Fig1C, Fig1D, Fig1E, Fig1F, Fig1G, Fig1H, Fig1I, Fig1J, Fig1K, Fig1L, ncol=3,labels= "AUTO") # labels=c("A Signal", "B Autocorrelation", "C Spectral Density", "D", "E", "F", "G", "H", "I", "J", "K", "L"))
+
+
+```
+
+
+
+## Figure 2
+
+### Plot figures
+
+```{r fig2}
+Fig2A<- hcai_combined %>% filter(season %in% c("2017-2018", "2018-2019", "2019-2020", "2021-2022")) %>% ggplot(aes(x=log(pop), y=omega, col=season)) +
+  geom_point()+ 
+  theme_classic()+  
+  # geom_text_repel(aes(label=location))+ 
+  # ggtitle("HCAI Weekly Influenza Admissions Time Series Forecastability (County and State)")+
+  xlab("Natural logarithm of population size")+
+  ylab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  geom_smooth(aes(fill=season), method="gam", formula= y~s(x, bs = "cs"))+
+  scale_color_manual(name = "Season", values=col_season)+
+  scale_fill_manual(name = "Season", values=col_season)+
+  theme(legend.position="bottom")+
+  # xlim(c(9,20))+
+  ylim(c(0,45))
+
+
+Fig2B<- hcai_state_omega %>% mutate(season_dummy=season) %>% 
+  separate(season_dummy, into = c("season_start", "season_end"), sep = "-") %>% 
+  left_join(hcai_burden, by=c("location", "season")) %>% 
+  left_join(flu_subtypes, by="season")%>%
+  filter(location=="California", season %notin% c("1999-2000", "2020-2021", "2022-2023")) %>% ggplot(aes(x=log(max_admits), y=omega)) + 
+  geom_smooth(method = "lm", se = TRUE, alpha=0.3)+
+  geom_point(aes(col=CDPH), size=2)+ 
+  geom_text_repel(aes(label=season_start, col=CDPH))+ 
+  theme_classic()+
+  xlab("Natural logarithm of peak weekly admissions")+
+  ylab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  scale_color_manual(name = "Predominant Influenza Subtype", values=col_subtype)+
+  theme(legend.position="bottom")+
+  ylim(c(0,45))
+
+cowplot::plot_grid(Fig2A, Fig2B, ncol=1, labels="AUTO", align="h")
+```
+
+## Figure 4: Sampling Frequency
+```{r fig4}
+cadence<- state_flu_cadence %>% bind_rows(state_covid_cadence)
+
+Fig4<- cadence %>% filter(season %notin% c("2022-2024")) %>% 
+  ggplot(aes(x=log(pop), y=omega, col=season)) +
+  geom_point()+ 
+  facet_grid( disease ~cadence)+
+  theme_classic()+  
+  geom_smooth(aes(fill=season), method = "lm", se = TRUE, alpha=0.3)+
+  geom_text_repel(aes(label=state))+ 
+  scale_color_manual(name = "Season", values=col_season)+
+  scale_fill_manual(name = "Season", values=col_season)+
+  ylim(c(0,45))+
+  theme(legend.position="bottom")+
+  xlab("Natural logarithm of population size")+
+  ylab(expression(paste("Forecastability (",  Omega, ") (%)")))
+
+Fig4
+
+
+# SupFig2<-state_covid_cadence %>% 
+#   filter(season != "2022-2024")%>%
+#   ggplot(aes(x=log(pop), y=omega, col=season)) +
+#   facet_wrap(data_type ~.)+
+#   geom_point()+ 
+#   theme_classic()+  
+#   geom_smooth(aes(fill=season), method = "lm", se = TRUE, alpha=0.3)+
+#   geom_text_repel(aes(label=state))+ 
+#   scale_color_manual(name = "Season", values=col_season)+
+#   scale_fill_manual(name = "Season", values=col_season)+
+#   ylim(c(0,45))+
+#   theme(legend.position="bottom")+
+#   xlab("Natural logarithm of population size")+
+#   ylab(expression(paste("Forecastability (",  Omega, ") (%)")))
+
+
+```
+
+
+## Supplemental Figure 1
+
+```{r SupFig1}
+SupFig1<-hcai_state_omega %>% mutate(season_dummy=season) %>% 
+  separate(season_dummy, into = c("season_start", "season_end"), sep = "-") %>%  
+  left_join(hcai_burden, by=c("location", "season")) %>% 
+    left_join(flu_subtypes, by="season")%>%
+  filter(location=="California", season %notin% c("1999-2000", "2020-2021", "2022-2023")) %>% ggplot(aes(x=log(total_admits), y=omega)) + 
+  geom_smooth(method = "lm", se = TRUE, alpha=0.3)+
+  geom_text_repel(aes(label=season_start, col=CDPH))+ 
+  geom_point(aes(col=CDPH), size=2)+ 
+  theme_classic()+
+  xlab("Natural logarithm of cumulative hospital admissions")+
+  ylab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  scale_color_manual(name = "Predominant Influenza Subtype", values=col_subtype)
+
+SupFig1
+
+
+```
+
+
+## Figure 3
+```{r fig3}
+
+Fig3A<-combo %>% filter(season %in% c("2022-2023", "2023-2024"), location_level=="state") %>%
+  ggplot(aes(x=log_pop, y=omega, col=season))  +
+  geom_point(alpha=0.5) +
+  facet_grid(.~disease) +
+  # geom_line(data = flu_piece, color = col_diseases[2])+
+  # geom_line(data = covid_piece, color = col_diseases[1])+
+  geom_smooth(aes(fill=season, col=season), method="gam", formula= y~s(x, bs = "cs"))+
+
+  xlab("Natural logarithm of population size")+
+  ylab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+    scale_color_manual(name = "Season", values=col_season)+
+      scale_fill_manual(name = "Season", values=col_season)+
+  theme_classic()
+
+Fig3B<-forecastability %>% 
+  dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%
+  ggplot(aes(x=omega, y=ae_median, col=model)) + 
+  facet_grid(season~disease) + 
+  geom_point() +
+   geom_smooth(aes(fill=model), method = "lm", se = TRUE)+
+   theme_classic()+
+# theme(legend.position = "none")+
+    xlab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  ylab("MAE on Log Scale")+
+    scale_color_manual(name = "Model", values=col_models)+
+      scale_fill_manual(name = "Model", values=col_models)
+
+
+Fig3C<-forecastability %>%
+  dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%  ggplot(aes(x=omega, y=interval_score, col=model)) + facet_grid(season~disease) + 
+  geom_point() +
+   geom_smooth(aes(fill=model), method = "lm", se = TRUE)+
+   theme_classic()+
+# theme(legend.position = "none")+
+      xlab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  ylab("Mean WIS on Log Scale")+
+    scale_color_manual(name = "Model", values=col_models)+
+      scale_fill_manual(name = "Model", values=col_models)
+
+Fig3D<- forecastability %>%
+  dplyr::filter(model == "Ensemble") %>%  ggplot(aes(x=omega, y=scaled_rel_skill, col=season)) + 
+  facet_grid(.~ disease) + 
+  geom_point() +
+   geom_smooth(aes(fill=season), method = "lm", se = TRUE)+
+   theme_classic()+
+    scale_color_manual(name = "Season", values=col_season)+
+      scale_fill_manual(name = "Season", values=col_season)+
+# theme(legend.position = "none")+
+      xlab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  ylab("Scaled Relative Skill")
+
+
+Fig3 <-cowplot::plot_grid(Fig3A, Fig3B, Fig3C, Fig3D, ncol=1, labels="AUTO")
+
+Fig3
+```
+
+## Supplementary Figure 2
+```{r sup-fig2}
+
+
+SupFig2A<-forecastability %>% 
+  dplyr::filter(model %notin% c("MOBS-GLEAM", "CEPH-Rtrend")) %>%
+  ggplot(aes(x=log(pop), y=ae_median, col=model))+ facet_grid(season~disease)+ geom_point()+
+   theme_classic()+
+   geom_smooth(method = "lm", se = TRUE)+
+theme(legend.position = "none")+
+  xlab("ln(Population size)")+
+  ylab("Mean Absolute Error")
+
+
+SupFig2B<-forecastability %>% 
+  dplyr::filter(model %notin% c("MOBS-GLEAM", "CEPH-Rtrend")) %>%
+  ggplot(aes(x=log(pop), y=interval_score, col=model))+ facet_grid(season~disease)+ geom_point()+
+   theme_classic()+
+   geom_smooth(method = "lm", se = TRUE)+
+    xlab("ln(Population size)")+
+theme(legend.position = "none")+
+  ylab("Mean Weighted Interval Score")
+
+
+legend_plot<- forecastability %>% 
+    dplyr::filter(model %notin% c("MOBS-GLEAM", "CEPH-Rtrend")) %>%
+  ggplot(aes(x=log(pop), y=ae_median, col=model))+ facet_wrap(season~disease)+ geom_point()+
+   theme_classic()+
+   geom_smooth(method = "lm", se = TRUE)+
+    xlab("ln(Population size)")+
+  ylab("Median Absolute Error")+
+  theme(legend.position="bottom")
+
+SupFig2_legend <- get_plot_component(legend_plot, "guide-box", return_all = TRUE)
+
+preSupFig2<-cowplot::plot_grid(SupFig2A, SupFig2B, nrow=1, labels="AUTO")
+SupFig2<-cowplot::plot_grid(preSupFig2, SupFig2_legend[[3]], nrow=2, rel_heights = c(2,0.5))
+
+
+SupFig2
+```
+
+
+## Table 1: Linear model results
+
+```{r table1}
+forecastability_nested <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest()
+
+ lm_mae <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest() %>%
+   mutate(data = map(data, ~ .x %>%
+                    summarise(model = list(broom::tidy(lm(ae_median ~ omega)))))) %>% 
+   unnest %>% 
+   unnest
+ 
+ lm_wis <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest() %>%
+   mutate(data = map(data, ~ .x %>%
+                    summarise(model = list(broom::tidy(lm(interval_score ~ omega)))))) %>% 
+   unnest %>% 
+   unnest %>%
+   distinct() %>%
+   arrange(disease, model, season)
+ 
+  lm_skill <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest() %>%
+   mutate(data = map(data, ~ .x %>%
+                    summarise(model = list(broom::tidy(lm(scaled_rel_skill ~ omega)))))) %>% 
+   unnest %>% 
+   unnest %>%
+   distinct() %>%
+   arrange(disease, model, season)
+ 
+lm_results<- lm_mae %>% mutate(metric="MAE") %>% bind_rows(lm_wis %>% mutate(metric="WIS")) %>% filter(model %in% c("Baseline", "Ensemble")) %>% arrange(metric, disease, model, season) %>%
+  mutate(across(where(is.numeric), signif, 3)) %>%
+    filter(term=="omega") %>%
+  dplyr::select(Metric=metric, Disease=disease, Model=model, Season=season, Estimate=estimate, `Standard Error`=std.error, Statistic=statistic, `p-value`=p.value)
+
+lm_results_skill<-  lm_skill %>% mutate(metric="skill") %>% filter(model %in% c("Ensemble")) %>% arrange(metric, disease, model, season) %>%
+  mutate(across(where(is.numeric), signif, 3)) %>%
+    filter(term=="omega") %>%
+  dplyr::select(Metric=metric, Disease=disease, Model=model, Season=season, Estimate=estimate, `Standard Error`=std.error, Statistic=statistic, `p-value`=p.value)
+
+
+write_csv(lm_results, "results/lm_results_MMWR.csv")
+write_csv(lm_results_skill, "results/lm_results_skill__MMWR.csv")
+
+```
+
+## Session Info
+```{r session-info}
+sessionInfo()
+```

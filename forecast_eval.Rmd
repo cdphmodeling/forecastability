@@ -1,0 +1,70 @@
+---
+title: "Forecast Evaluation"
+author: "Lauren White (lauren.white@cdph.ca.gov)"
+date: '2024-12-31'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(scoringutils)
+library(arrow)
+
+season22_start_MMWR<- as.Date("2022-10-02")  #Beginning of week 40 for 2022-2023 season
+season23_start_MMWR<- as.Date("2023-10-01") #Beginning of week 40 for 2023-2024 season
+season22_start<-  as.Date("2022-07-01")
+season23_start<- as.Date("2023-07-01")
+season24_end<- as.Date("2024-04-30") #End of mandatory NHSN reporting period in 2024
+```
+
+# Load requisite data
+This file is dependent on objects loaded from the `load_data.R` file, so if that hasn't been done yet, run that here.
+
+```{r load-data}
+source("load_data.R")
+```
+
+
+## Evaluate forecasts
+
+### Score forecasts
+https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1011393
+```{r score-forecasts}
+# comb_fc<-read_csv("data/raw_forecasts.csv") %>% filter(forecast_date>season22_start)
+comb_fc<-read_parquet("data/raw_forecasts.gz.parquet") %>% filter(forecast_date>season22_start)
+
+#comb_fc<-read_parquet("data/raw_forecasts_MMWRseason.parquet") %>% filter(forecast_date>season22_start) #alternative for MMWR-based seasons
+
+check_forecasts(comb_fc)
+find_duplicates(comb_fc)
+avail_forecasts(comb_fc, by = c("model", "target", "location"))
+
+prelim_scores<-score(comb_fc) 
+
+scores<- prelim_scores%>% summarise_scores(by=c("model", "target", "location", "season", "disease"), relative_skill = TRUE, baseline= "Baseline") %>%  
+  #pairwise_comparison(by = "model", baseline = "Baseline") %>%
+  left_join(demog, by = "location") %>%
+  left_join(hosp_capacity, by=c("location", "season")) %>%
+  left_join(num_facilities, by=c("location", "season")) %>%
+  left_join(seasonal_burden, by=c("location", "season", "disease")) %>%
+  mutate(wis_per100k=interval_score/pop*100000, normalized_wis_dens=interval_score/density, wis_hosp_capacity= interval_score/inpatient_beds, wis_facilities=interval_score/median_facilities, wis_burden= interval_score/burden)
+
+write_csv(scores, "results/forecast_scores_MMWR.csv")
+
+```
+
+## Combine forecast scores with forecastability scores
+
+```{r combine_forecasts}
+#scores<-read_csv("results/forecast_scores_MMWR.csv")
+scores<-read_csv("results/forecast_scores.csv")
+
+combo<- read.csv("results/combo_omega.csv")
+forecastability<-scores %>% left_join(combo %>% dplyr:: select(location, omega, season, disease), by= c("location", "season", "disease"))
+# write_csv(forecastability, "results/forecastability_results_MMWR.csv")
+write_csv(forecastability, "results/forecastability_results.csv")
+```
+
