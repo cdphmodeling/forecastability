@@ -1,0 +1,5 @@
+Metric,Disease,Model,Season,Estimate,Standard Error,Statistic,p-value
+skill,COVID-19,Ensemble,2022-2023,-0.00916,0.00222,-4.13,1.39e-4
+skill,COVID-19,Ensemble,2023-2024,-0.00742,0.002,-3.71,5.27e-4
+skill,Influenza,Ensemble,2022-2023,-0.0101,0.00131,-7.71,4.71e-10
+skill,Influenza,Ensemble,2023-2024,-0.0115,0.00144,-7.97,1.83e-10
