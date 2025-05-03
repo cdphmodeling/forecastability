@@ -9,8 +9,10 @@
 
 library(data.table)
 library(jsonlite)
+#pak::pkg_install("cmu-delphi/epipredict@main")
 library(epipredict)
 library(httr)
+#devtools::install_github("Chicago/RSocrata")
 library(RSocrata)
 library(dplyr)
 library(tidyr)
