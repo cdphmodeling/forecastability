@@ -30,41 +30,74 @@ source("load_data.R")
 
 ## Evaluate forecasts
 
-### Score forecasts
+### Score forecasts (MMWR Season)
 https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1011393
 ```{r score-forecasts}
-# comb_fc<-read_csv("data/raw_forecasts.csv") %>% filter(forecast_date>season22_start)
-comb_fc<-read_parquet("data/raw_forecasts.gz.parquet") %>% filter(forecast_date>season22_start)
 
-#comb_fc<-read_parquet("data/raw_forecasts_MMWRseason.parquet") %>% filter(forecast_date>season22_start) #alternative for MMWR-based seasons
+comb_fc<-read_parquet("data/raw_forecasts_MMWRseason.gz.parquet") %>% filter(forecast_date>season22_start_MMWR) %>% rename(observed=true_value, predicted=prediction, quantile_level=quantile) %>% drop_na(location)
 
-check_forecasts(comb_fc)
-find_duplicates(comb_fc)
-avail_forecasts(comb_fc, by = c("model", "target", "location"))
+get_duplicate_forecasts(comb_fc)
 
-prelim_scores<-score(comb_fc) 
+forecast_quantile <- comb_fc |>
+  as_forecast_quantile()
 
-scores<- prelim_scores%>% summarise_scores(by=c("model", "target", "location", "season", "disease"), relative_skill = TRUE, baseline= "Baseline") %>%  
-  #pairwise_comparison(by = "model", baseline = "Baseline") %>%
+print(forecast_quantile, 2)
+
+prelim_scores<-score(forecast_quantile) |> add_relative_skill(compare= "model", by=c("location", "disease", "season"), baseline ="Baseline")
+
+scores<- prelim_scores%>% summarise_scores(by=c("model", "target", "location", "season", "disease")) %>% 
   left_join(demog, by = "location") %>%
   left_join(hosp_capacity, by=c("location", "season")) %>%
   left_join(num_facilities, by=c("location", "season")) %>%
   left_join(seasonal_burden, by=c("location", "season", "disease")) %>%
-  mutate(wis_per100k=interval_score/pop*100000, normalized_wis_dens=interval_score/density, wis_hosp_capacity= interval_score/inpatient_beds, wis_facilities=interval_score/median_facilities, wis_burden= interval_score/burden)
+  mutate(wis_per100k=wis/pop*100000, normalized_wis_dens=wis/density, wis_hosp_capacity= wis/inpatient_beds, wis_facilities=wis/median_facilities, wis_burden= wis/burden)
 
 write_csv(scores, "results/forecast_scores_MMWR.csv")
+```
 
+### Score forecasts (July-June Season)
+```{r score-summer-forecasts}
+
+comb_fc_summer<-read_parquet("data/raw_forecasts.gz.parquet") %>% filter(forecast_date>season22_start) %>% rename(observed=true_value, predicted=prediction, quantile_level=quantile) %>% drop_na(location)  #alternative for July-June seasons
+
+get_duplicate_forecasts(comb_fc_summer)
+
+forecast_quantile_summer <- comb_fc_summer |>
+  as_forecast_quantile() %>% arrange(forecast_date)
+
+print(forecast_quantile_summer, 2)
+
+prelim_scores_summer<-score(forecast_quantile_summer) |> add_relative_skill(compare= "model", by=c("location", "disease", "season"), baseline ="Baseline")
+
+scores_summer<- prelim_scores_summer %>% summarise_scores(by=c("model", "target", "location", "season", "disease")) %>%  
+  left_join(demog, by = "location") %>%
+  left_join(hosp_capacity, by=c("location", "season")) %>%
+  left_join(num_facilities, by=c("location", "season")) %>%
+  left_join(seasonal_burden, by=c("location", "season", "disease")) %>%
+  mutate(wis_per100k=wis/pop*100000, normalized_wis_dens=wis/density, wis_hosp_capacity= wis/inpatient_beds, wis_facilities=wis/median_facilities, wis_burden= wis/burden)
+
+
+write_csv(scores_summer, "results/forecast_scores.csv") #alternative July-June season
 ```
 
 ## Combine forecast scores with forecastability scores
 
-```{r combine_forecasts}
-#scores<-read_csv("results/forecast_scores_MMWR.csv")
-scores<-read_csv("results/forecast_scores.csv")
+### MMWR Season
+```{r combine-forecasts}
+# scores<-read_csv("results/forecast_scores_MMWR.csv")
 
-combo<- read.csv("results/combo_omega.csv")
+combo<- read.csv("results/combo_omega_MMWR.csv")
 forecastability<-scores %>% left_join(combo %>% dplyr:: select(location, omega, season, disease), by= c("location", "season", "disease"))
-# write_csv(forecastability, "results/forecastability_results_MMWR.csv")
-write_csv(forecastability, "results/forecastability_results.csv")
+
+write_csv(forecastability, "results/forecastability_results_MMWR.csv")
+```
+
+### July-June Season
+```{r combine-forecasts-summer}
+# scores_summer<-read_csv("results/forecast_scores.csv")
+combo_summer<- read.csv("results/combo_omega.csv")
+forecastability_summer<-scores_summer %>% left_join(combo_summer %>% dplyr:: select(location, omega, season, disease), by= c("location", "season", "disease"))
+write_csv(forecastability_summer, "results/forecastability_results.csv")
+
 ```
 

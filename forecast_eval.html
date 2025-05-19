@@ -364,6 +364,7 @@ display: none;
 here.</p>
 <pre class="r"><code>source(&quot;load_data.R&quot;)</code></pre>
 <pre><code>## Loading required package: epiprocess</code></pre>
+<pre><code>## Loading required package: epidatasets</code></pre>
 <pre><code>## Registered S3 method overwritten by &#39;tsibble&#39;:
 ##   method               from 
 ##   as_tibble.grouped_df dplyr</code></pre>
@@ -373,6 +374,14 @@ here.</p>
 ## 
 ##     filter</code></pre>
 <pre><code>## Loading required package: parsnip</code></pre>
+<pre><code>## Registered S3 method overwritten by &#39;epipredict&#39;:
+##   method            from   
+##   print.step_naomit recipes</code></pre>
+<pre><code>## 
+## Attaching package: &#39;epipredict&#39;</code></pre>
+<pre><code>## The following objects are masked from &#39;package:epidatasets&#39;:
+## 
+##     grad_employ_subset, state_census</code></pre>
 <pre><code>## We encourage COVIDcast API users to register on our mailing list:
 ## https://lists.andrew.cmu.edu/mailman/listinfo/delphi-covidcast-api
 ## We&#39;ll send announcements about new data sources, package updates,
@@ -380,6 +389,9 @@ here.</p>
 <pre><code>## 
 ## Attaching package: &#39;covidcast&#39;</code></pre>
 <pre><code>## The following object is masked from &#39;package:epipredict&#39;:
+## 
+##     state_census</code></pre>
+<pre><code>## The following object is masked from &#39;package:epidatasets&#39;:
 ## 
 ##     state_census</code></pre>
 <pre><code>## 
@@ -490,161 +502,107 @@ here.</p>
 ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
 <div id="evaluate-forecasts" class="section level2">
 <h2>Evaluate forecasts</h2>
-<div id="score-forecasts" class="section level3">
-<h3>Score forecasts</h3>
+<div id="score-forecasts-mmwr-season" class="section level3">
+<h3>Score forecasts (MMWR Season)</h3>
 <p><a href="https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1011393" class="uri">https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1011393</a></p>
-<pre class="r"><code># comb_fc&lt;-read_csv(&quot;data/raw_forecasts.csv&quot;) %&gt;% filter(forecast_date&gt;season22_start)
-comb_fc&lt;-read_parquet(&quot;data/raw_forecasts.gz.parquet&quot;) %&gt;% filter(forecast_date&gt;season22_start)
+<pre class="r"><code>comb_fc&lt;-read_parquet(&quot;data/raw_forecasts_MMWRseason.gz.parquet&quot;) %&gt;% filter(forecast_date&gt;season22_start_MMWR) %&gt;% rename(observed=true_value, predicted=prediction, quantile_level=quantile) %&gt;% drop_na(location)
 
-#comb_fc&lt;-read_parquet(&quot;data/raw_forecasts_MMWRseason.parquet&quot;) %&gt;% filter(forecast_date&gt;season22_start) #alternative for MMWR-based seasons
+get_duplicate_forecasts(comb_fc)</code></pre>
+<pre><code>## Empty data.table (0 rows and 11 cols): forecast_date,horizon,target,target_end_date,quantile_level,predicted...</code></pre>
+<pre class="r"><code>forecast_quantile &lt;- comb_fc |&gt;
+  as_forecast_quantile()
 
-check_forecasts(comb_fc)</code></pre>
-<pre><code>## The following messages were produced when checking inputs:
-## 1.  87423 values for `true_value` are NA in the data provided and the corresponding rows were removed. This may indicate a problem if unexpected.</code></pre>
-<pre><code>## Your forecasts seem to be for a target of the following type:
-## $target_type
-## [1] &quot;continuous&quot;
-## 
-## and in the following format:
-## $prediction_type
-## [1] &quot;quantile&quot;
-## 
-## The unit of a single forecast is defined by:
-## $forecast_unit
-## [1] &quot;forecast_date&quot;   &quot;horizon&quot;         &quot;target&quot;          &quot;target_end_date&quot;
-## [5] &quot;model&quot;           &quot;location&quot;        &quot;season&quot;          &quot;disease&quot;        
-## 
-## Cleaned data, rows with NA values in prediction or true_value removed:
-## $cleaned_data
-##          forecast_date horizon      target target_end_date quantile prediction
-##                 &lt;Date&gt;   &lt;num&gt;      &lt;char&gt;          &lt;Date&gt;    &lt;num&gt;      &lt;num&gt;
-##       1:    2022-10-17       1 wk inc hosp      2022-10-22    0.010   3.633270
-##       2:    2022-10-17       1 wk inc hosp      2022-10-22    0.025   3.851169
-##       3:    2022-10-17       1 wk inc hosp      2022-10-22    0.050   3.964331
-##       4:    2022-10-17       1 wk inc hosp      2022-10-22    0.100   4.122539
-##       5:    2022-10-17       1 wk inc hosp      2022-10-22    0.150   4.242973
-##      ---                                                                      
-## 5234129:    2024-04-08       1 wk inc hosp      2024-04-15    0.850   7.664394
-## 5234130:    2024-04-08       1 wk inc hosp      2024-04-15    0.900   7.770730
-## 5234131:    2024-04-08       1 wk inc hosp      2024-04-15    0.950   7.920628
-## 5234132:    2024-04-08       1 wk inc hosp      2024-04-15    0.975   8.057694
-## 5234133:    2024-04-08       1 wk inc hosp      2024-04-15    0.990   8.214628
-##                        model location true_value    season   disease
-##                       &lt;char&gt;   &lt;char&gt;      &lt;num&gt;    &lt;char&gt;    &lt;char&gt;
-##       1:            Ensemble       al   4.955827 2022-2023 Influenza
-##       2:            Ensemble       al   4.955827 2022-2023 Influenza
-##       3:            Ensemble       al   4.955827 2022-2023 Influenza
-##       4:            Ensemble       al   4.955827 2022-2023 Influenza
-##       5:            Ensemble       al   4.955827 2022-2023 Influenza
-##      ---                                                            
-## 5234129: SGroup-RandomForest       us   6.820016 2023-2024  COVID-19
-## 5234130: SGroup-RandomForest       us   6.820016 2023-2024  COVID-19
-## 5234131: SGroup-RandomForest       us   6.820016 2023-2024  COVID-19
-## 5234132: SGroup-RandomForest       us   6.820016 2023-2024  COVID-19
-## 5234133: SGroup-RandomForest       us   6.820016 2023-2024  COVID-19
-## 
-## Number of unique values per column per model:
-## $unique_values
-##                     model forecast_date horizon target target_end_date quantile
-##                    &lt;char&gt;         &lt;int&gt;   &lt;int&gt;  &lt;int&gt;           &lt;int&gt;    &lt;int&gt;
-##  1:              Ensemble           121       5      1             156       23
-##  2:              Baseline           122       5      1             158       23
-##  3:        CMU-TimeSeries           120       5      1             156       23
-##  4: UMass-trends_ensemble           122       5      1             157       23
-##  5:           CEPH-Rtrend            57       5      1              60       23
-##  6:            MOBS-GLEAM            60       5      1              63       23
-##  7:              PSI-DICE            93       4      1             150       23
-##  8:   SGroup-RandomForest           113       5      1             126       23
-##  9:     CEPH-Rtrend_covid            69       4      1              70       23
-## 10:      MOBS-GLEAM_COVID            86       4      1              93       23
-##     prediction location true_value season disease
-##          &lt;int&gt;    &lt;int&gt;      &lt;int&gt;  &lt;int&gt;   &lt;int&gt;
-##  1:     206550       55        810      2       2
-##  2:     298292       55        812      2       2
-##  3:     619376       53        804      2       2
-##  4:      11574       54        811      2       2
-##  5:      37489       53        649      2       1
-##  6:     133499       52        655      2       1
-##  7:     180254       54        709      2       2
-##  8:      20332       54        744      2       2
-##  9:      83353       55        394      2       1
-## 10:     246522       52        488      2       1
-## 
-## $messages
-## [1] &quot;87423 values for `true_value` are NA in the data provided and the corresponding rows were removed. This may indicate a problem if unexpected.&quot;</code></pre>
-<pre class="r"><code>find_duplicates(comb_fc)</code></pre>
-<pre><code>##        forecast_date horizon      target target_end_date quantile prediction
-##               &lt;Date&gt;   &lt;num&gt;      &lt;char&gt;          &lt;Date&gt;    &lt;num&gt;      &lt;num&gt;
-##     1:    2022-07-04       1 wk inc hosp      2022-07-11    0.010  0.6931472
-##     2:    2022-07-04       1 wk inc hosp      2022-07-11    0.010  0.0000000
-##     3:    2022-07-04       2 wk inc hosp      2022-07-18    0.010  0.6931472
-##     4:    2022-07-04       2 wk inc hosp      2022-07-18    0.010  0.0000000
-##     5:    2022-07-04       3 wk inc hosp      2022-07-25    0.010  0.0000000
-##    ---                                                                      
-## 88523:    2024-04-22       1 wk inc hosp      2024-04-29    0.850  7.4417895
-## 88524:    2024-04-22       1 wk inc hosp      2024-04-29    0.900  7.5502405
-## 88525:    2024-04-22       1 wk inc hosp      2024-04-29    0.950  7.7124438
-## 88526:    2024-04-22       1 wk inc hosp      2024-04-29    0.975  7.8475672
-## 88527:    2024-04-22       1 wk inc hosp      2024-04-29    0.990  8.0176701
-##                      model location true_value    season  disease
-##                     &lt;char&gt;   &lt;char&gt;      &lt;num&gt;    &lt;char&gt;   &lt;char&gt;
-##     1:            Ensemble     &lt;NA&gt;         NA 2022-2023 COVID-19
-##     2:            Ensemble     &lt;NA&gt;         NA 2022-2023 COVID-19
-##     3:            Ensemble     &lt;NA&gt;         NA 2022-2023 COVID-19
-##     4:            Ensemble     &lt;NA&gt;         NA 2022-2023 COVID-19
-##     5:            Ensemble     &lt;NA&gt;         NA 2022-2023 COVID-19
-##    ---                                                           
-## 88523: SGroup-RandomForest     &lt;NA&gt;         NA 2023-2024 COVID-19
-## 88524: SGroup-RandomForest     &lt;NA&gt;         NA 2023-2024 COVID-19
-## 88525: SGroup-RandomForest     &lt;NA&gt;         NA 2023-2024 COVID-19
-## 88526: SGroup-RandomForest     &lt;NA&gt;         NA 2023-2024 COVID-19
-## 88527: SGroup-RandomForest     &lt;NA&gt;         NA 2023-2024 COVID-19</code></pre>
-<pre class="r"><code>avail_forecasts(comb_fc, by = c(&quot;model&quot;, &quot;target&quot;, &quot;location&quot;))</code></pre>
-<pre><code>## The following messages were produced when checking inputs:
-## 1.  87423 values for `true_value` are NA in the data provided and the corresponding rows were removed. This may indicate a problem if unexpected.</code></pre>
-<pre><code>##                    model      target location Number forecasts
-##                   &lt;char&gt;      &lt;char&gt;   &lt;char&gt;            &lt;int&gt;
-##   1:            Ensemble wk inc hosp       al              596
-##   2:            Ensemble wk inc hosp       ak              596
-##   3:            Ensemble wk inc hosp       az              596
-##   4:            Ensemble wk inc hosp       ar              596
-##   5:            Ensemble wk inc hosp       ca              596
-##  ---                                                          
-## 533:    MOBS-GLEAM_COVID wk inc hosp       ma              328
-## 534:    MOBS-GLEAM_COVID wk inc hosp       mn              332
-## 535:    MOBS-GLEAM_COVID wk inc hosp       wa              324
-## 536:            PSI-DICE wk inc hosp     &lt;NA&gt;              296
-## 537: SGroup-RandomForest wk inc hosp     &lt;NA&gt;              205</code></pre>
-<pre class="r"><code>prelim_scores&lt;-score(comb_fc) </code></pre>
-<pre><code>## The following messages were produced when checking inputs:
-## 1.  87423 values for `true_value` are NA in the data provided and the corresponding rows were removed. This may indicate a problem if unexpected.</code></pre>
-<pre class="r"><code>scores&lt;- prelim_scores%&gt;% summarise_scores(by=c(&quot;model&quot;, &quot;target&quot;, &quot;location&quot;, &quot;season&quot;, &quot;disease&quot;), relative_skill = TRUE, baseline= &quot;Baseline&quot;) %&gt;%  
-  #pairwise_comparison(by = &quot;model&quot;, baseline = &quot;Baseline&quot;) %&gt;%
+print(forecast_quantile, 2)</code></pre>
+<pre><code>## Forecast type: quantile</code></pre>
+<pre><code>## Forecast unit:</code></pre>
+<pre><code>## forecast_date, horizon, target, target_end_date, model, location, season, and
+## disease</code></pre>
+<pre><code>## 
+##          forecast_date horizon      target target_end_date quantile_level
+##                 &lt;Date&gt;   &lt;num&gt;      &lt;char&gt;          &lt;Date&gt;          &lt;num&gt;
+##       1:    2022-10-17       1 wk inc hosp      2022-10-22          0.010
+##       2:    2022-10-17       1 wk inc hosp      2022-10-22          0.025
+##      ---                                                                 
+## 4819557:    2024-04-08       1 wk inc hosp      2024-04-15          0.975
+## 4819558:    2024-04-08       1 wk inc hosp      2024-04-15          0.990
+##          predicted               model location observed    season   disease
+##              &lt;num&gt;              &lt;char&gt;   &lt;char&gt;    &lt;num&gt;    &lt;char&gt;    &lt;char&gt;
+##       1:  3.633270            Ensemble       al 4.955827 2022-2023 Influenza
+##       2:  3.851169            Ensemble       al 4.955827 2022-2023 Influenza
+##      ---                                                                    
+## 4819557:  8.057694 SGroup-RandomForest       us 6.820016 2023-2024  COVID-19
+## 4819558:  8.214628 SGroup-RandomForest       us 6.820016 2023-2024  COVID-19</code></pre>
+<pre class="r"><code>prelim_scores&lt;-score(forecast_quantile) |&gt; add_relative_skill(compare= &quot;model&quot;, by=c(&quot;location&quot;, &quot;disease&quot;, &quot;season&quot;), baseline =&quot;Baseline&quot;)
+
+scores&lt;- prelim_scores%&gt;% summarise_scores(by=c(&quot;model&quot;, &quot;target&quot;, &quot;location&quot;, &quot;season&quot;, &quot;disease&quot;)) %&gt;% 
   left_join(demog, by = &quot;location&quot;) %&gt;%
   left_join(hosp_capacity, by=c(&quot;location&quot;, &quot;season&quot;)) %&gt;%
   left_join(num_facilities, by=c(&quot;location&quot;, &quot;season&quot;)) %&gt;%
   left_join(seasonal_burden, by=c(&quot;location&quot;, &quot;season&quot;, &quot;disease&quot;)) %&gt;%
-  mutate(wis_per100k=interval_score/pop*100000, normalized_wis_dens=interval_score/density, wis_hosp_capacity= interval_score/inpatient_beds, wis_facilities=interval_score/median_facilities, wis_burden= interval_score/burden)
+  mutate(wis_per100k=wis/pop*100000, normalized_wis_dens=wis/density, wis_hosp_capacity= wis/inpatient_beds, wis_facilities=wis/median_facilities, wis_burden= wis/burden)
 
 write_csv(scores, &quot;results/forecast_scores_MMWR.csv&quot;)</code></pre>
+</div>
+<div id="score-forecasts-july-june-season" class="section level3">
+<h3>Score forecasts (July-June Season)</h3>
+<pre class="r"><code>comb_fc_summer&lt;-read_parquet(&quot;data/raw_forecasts.gz.parquet&quot;) %&gt;% filter(forecast_date&gt;season22_start) %&gt;% rename(observed=true_value, predicted=prediction, quantile_level=quantile) %&gt;% drop_na(location)  #alternative for July-June seasons
+
+get_duplicate_forecasts(comb_fc_summer)</code></pre>
+<pre><code>## Empty data.table (0 rows and 11 cols): forecast_date,horizon,target,target_end_date,quantile_level,predicted...</code></pre>
+<pre class="r"><code>forecast_quantile_summer &lt;- comb_fc_summer |&gt;
+  as_forecast_quantile() %&gt;% arrange(forecast_date)
+
+print(forecast_quantile_summer, 2)</code></pre>
+<pre><code>## Forecast type: quantile</code></pre>
+<pre><code>## Forecast unit:</code></pre>
+<pre><code>## forecast_date, horizon, target, target_end_date, model, location, season, and
+## disease</code></pre>
+<pre><code>## 
+##          forecast_date horizon      target target_end_date quantile_level
+##                 &lt;Date&gt;   &lt;num&gt;      &lt;char&gt;          &lt;Date&gt;          &lt;num&gt;
+##       1:    2022-07-04       1 wk inc hosp      2022-07-11          0.010
+##       2:    2022-07-04       2 wk inc hosp      2022-07-18          0.010
+##      ---                                                                 
+## 5197401:    2024-04-27       0 wk inc hosp      2024-04-27          0.975
+## 5197402:    2024-04-27       0 wk inc hosp      2024-04-27          0.990
+##          predicted               model location  observed    season   disease
+##              &lt;num&gt;              &lt;char&gt;   &lt;char&gt;     &lt;num&gt;    &lt;char&gt;    &lt;char&gt;
+##       1:  0.000000            Ensemble       as 2.4849066 2022-2023  COVID-19
+##       2:  0.000000            Ensemble       as 0.6931472 2022-2023  COVID-19
+##      ---                                                                     
+## 5197401:  8.759653 SGroup-RandomForest       us 7.7919360 2023-2024 Influenza
+## 5197402:  8.907301 SGroup-RandomForest       us 7.7919360 2023-2024 Influenza</code></pre>
+<pre class="r"><code>prelim_scores_summer&lt;-score(forecast_quantile_summer) |&gt; add_relative_skill(compare= &quot;model&quot;, by=c(&quot;location&quot;, &quot;disease&quot;, &quot;season&quot;), baseline =&quot;Baseline&quot;)
+
+scores_summer&lt;- prelim_scores_summer %&gt;% summarise_scores(by=c(&quot;model&quot;, &quot;target&quot;, &quot;location&quot;, &quot;season&quot;, &quot;disease&quot;)) %&gt;%  
+  left_join(demog, by = &quot;location&quot;) %&gt;%
+  left_join(hosp_capacity, by=c(&quot;location&quot;, &quot;season&quot;)) %&gt;%
+  left_join(num_facilities, by=c(&quot;location&quot;, &quot;season&quot;)) %&gt;%
+  left_join(seasonal_burden, by=c(&quot;location&quot;, &quot;season&quot;, &quot;disease&quot;)) %&gt;%
+  mutate(wis_per100k=wis/pop*100000, normalized_wis_dens=wis/density, wis_hosp_capacity= wis/inpatient_beds, wis_facilities=wis/median_facilities, wis_burden= wis/burden)
+
+
+write_csv(scores_summer, &quot;results/forecast_scores.csv&quot;) #alternative July-June season</code></pre>
 </div>
 </div>
 <div id="combine-forecast-scores-with-forecastability-scores" class="section level2">
 <h2>Combine forecast scores with forecastability scores</h2>
-<pre class="r"><code>#scores&lt;-read_csv(&quot;results/forecast_scores_MMWR.csv&quot;)
-scores&lt;-read_csv(&quot;results/forecast_scores.csv&quot;)</code></pre>
-<pre><code>## Rows: 1655 Columns: 24
-## ── Column specification ────────────────────────────────────────────────────────
-## Delimiter: &quot;,&quot;
-## chr  (5): model, target, location, season, disease
-## dbl (19): interval_score, dispersion, underprediction, overprediction, cover...
-## 
-## ℹ Use `spec()` to retrieve the full column specification for this data.
-## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
-<pre class="r"><code>combo&lt;- read.csv(&quot;results/combo_omega.csv&quot;)
+<div id="mmwr-season" class="section level3">
+<h3>MMWR Season</h3>
+<pre class="r"><code># scores&lt;-read_csv(&quot;results/forecast_scores_MMWR.csv&quot;)
+
+combo&lt;- read.csv(&quot;results/combo_omega_MMWR.csv&quot;)
 forecastability&lt;-scores %&gt;% left_join(combo %&gt;% dplyr:: select(location, omega, season, disease), by= c(&quot;location&quot;, &quot;season&quot;, &quot;disease&quot;))
-# write_csv(forecastability, &quot;results/forecastability_results_MMWR.csv&quot;)
-write_csv(forecastability, &quot;results/forecastability_results.csv&quot;)</code></pre>
+
+write_csv(forecastability, &quot;results/forecastability_results_MMWR.csv&quot;)</code></pre>
+</div>
+<div id="july-june-season" class="section level3">
+<h3>July-June Season</h3>
+<pre class="r"><code># scores_summer&lt;-read_csv(&quot;results/forecast_scores.csv&quot;)
+combo_summer&lt;- read.csv(&quot;results/combo_omega.csv&quot;)
+forecastability_summer&lt;-scores_summer %&gt;% left_join(combo_summer %&gt;% dplyr:: select(location, omega, season, disease), by= c(&quot;location&quot;, &quot;season&quot;, &quot;disease&quot;))
+write_csv(forecastability_summer, &quot;results/forecastability_results.csv&quot;)</code></pre>
+</div>
 </div>
 </div>
 

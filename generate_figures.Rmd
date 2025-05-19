@@ -45,7 +45,7 @@ confidence<-0.05
 (if not already loaded in environment from running other Rmd scripts)
 ```{r}
 if(!exists("forecastability")) {
-  forecastability<-read_csv("results/forecastability_results.csv")
+  forecastability<-read_csv("results/forecastability_results_MMWR.csv")
 }
 
 if(!exists("combo")) {
@@ -363,7 +363,7 @@ Fig3B<-forecastability %>%
 
 
 Fig3C<-forecastability %>%
-  dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%  ggplot(aes(x=omega, y=interval_score, col=model)) + facet_grid(season~disease) + 
+  dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%  ggplot(aes(x=omega, y=wis, col=model)) + facet_grid(season~disease) + 
   geom_point() +
    geom_smooth(aes(fill=model), method = "lm", se = TRUE)+
    theme_classic()+
@@ -374,7 +374,7 @@ Fig3C<-forecastability %>%
       scale_fill_manual(name = "Model", values=col_models)
 
 Fig3D<- forecastability %>%
-  dplyr::filter(model == "Ensemble") %>%  ggplot(aes(x=omega, y=scaled_rel_skill, col=season)) + 
+  dplyr::filter(model == "Ensemble") %>%  ggplot(aes(x=omega, y=wis_scaled_relative_skill, col=season)) + 
   facet_grid(.~ disease) + 
   geom_point() +
    geom_smooth(aes(fill=season), method = "lm", se = TRUE)+
@@ -407,7 +407,7 @@ theme(legend.position = "none")+
 
 SupFig2B<-forecastability %>% 
   dplyr::filter(model %notin% c("MOBS-GLEAM", "CEPH-Rtrend")) %>%
-  ggplot(aes(x=log(pop), y=interval_score, col=model))+ facet_grid(season~disease)+ geom_point()+
+  ggplot(aes(x=log(pop), y=wis, col=model))+ facet_grid(season~disease)+ geom_point()+
    theme_classic()+
    geom_smooth(method = "lm", se = TRUE)+
     xlab("ln(Population size)")+
@@ -453,7 +453,7 @@ forecastability_nested <- forecastability %>%
   group_by(model, season, disease) %>%
   nest() %>%
    mutate(data = map(data, ~ .x %>%
-                    summarise(model = list(broom::tidy(lm(interval_score ~ omega)))))) %>% 
+                    summarise(model = list(broom::tidy(lm(wis ~ omega)))))) %>% 
    unnest %>% 
    unnest %>%
    distinct() %>%
@@ -463,7 +463,7 @@ forecastability_nested <- forecastability %>%
   group_by(model, season, disease) %>%
   nest() %>%
    mutate(data = map(data, ~ .x %>%
-                    summarise(model = list(broom::tidy(lm(scaled_rel_skill ~ omega)))))) %>% 
+                    summarise(model = list(broom::tidy(lm(wis_scaled_relative_skill ~ omega)))))) %>% 
    unnest %>% 
    unnest %>%
    distinct() %>%
@@ -481,7 +481,7 @@ lm_results_skill<-  lm_skill %>% mutate(metric="skill") %>% filter(model %in% c(
 
 
 write_csv(lm_results, "results/lm_results_MMWR.csv")
-write_csv(lm_results_skill, "results/lm_results_skill__MMWR.csv")
+write_csv(lm_results_skill, "results/lm_results_skill_MMWR.csv")
 
 ```
 
