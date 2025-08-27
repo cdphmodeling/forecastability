@@ -231,6 +231,8 @@ cowplot::plot_grid(Fig1A, Fig1B, Fig1C, Fig1D, Fig1E, Fig1F, Fig1G, Fig1H, Fig1I
 
 
 
+
+
 ## Figure 2
 
 ### Plot figures
@@ -330,6 +332,87 @@ SupFig1
 
 ```
 
+## Figure 5
+
+Effects of data aggregation/smoothing (rolling sum)
+
+```{r}
+
+### Single state and different intervals of rolling sum ----------
+library(covidcast)
+hosp_flu <-covidcast_signal(data_source = "hhs",
+                          signal = "confirmed_admissions_influenza_1d",
+                          start_day = "2022-02-02", end_day = Sys.Date(), geo_type=c("state"), geo_value=c("md"))
+min_date<- min(hosp_flu$time_value)
+md_flu<- hosp_flu %>%   arrange(time_value) %>% mutate(days=time_value-min_date)
+
+# fore_md_rolling<-data.frame(sampling_frequency=integer(365), forecastability=numeric(365))
+# 
+# for (i in 1:56){
+#   md_temp<-md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= zoo::rollsum(value, k = i, align = "right", fill = NA)) %>% 
+#     filter(days %% i==0)  %>% 
+#     mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y)
+#   fore_flu_temp<- as.numeric(Omega(md_temp$lag_y, spectrum.control = sc, entropy.control = ec))
+#   fore_md_rolling$sampling_frequency[i]=i
+#   fore_md_rolling$forecastability[i]=fore_flu_temp
+# }
+# 
+# md_temp %>% ggplot(aes(days,rolling_sum)) + geom_point()+geom_line() + theme_classic() +xlab("Days")+ylab("")
+# 
+# 
+# Fig5D<- fore_md_rolling %>% filter(sampling_frequency !=0) %>% ggplot(aes(sampling_frequency, forecastability))+ geom_point() + theme_classic()+
+#     geom_smooth(aes(sampling_frequency, forecastability), method="gam", formula= y~s(x, bs = "cs"))+ 
+#    xlab("Days of Aggregation")+
+#   ylab("Forecastabilty")
+# 
+# Fig5A<-md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= value)  %>% mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y) %>% ggplot(aes(days,rolling_sum)) +geom_line() + theme_classic() +xlab("Days")+ylab("Incident Hospital Admissions")+
+#   ggtitle("Daily Reporting") 
+# 
+# Fig5B<-md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= zoo::rollsum(value, k = 28, align = "right", fill = NA)) %>% filter(days %% 28==0)  %>% mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y) %>% ggplot(aes(days,rolling_sum)) +geom_line() + geom_point()+ theme_classic() +xlab("Days")+ylab("")+
+#   ggtitle("4 Week Aggregation")
+# 
+# Fig5C<- md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= zoo::rollsum(value, k = 56, align = "right", fill = NA)) %>% filter(days %% 56==0)  %>% mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y) %>% ggplot(aes(days,rolling_sum)) +geom_line() + geom_point()+ theme_classic() +xlab("Days")+ylab("")+
+#   ggtitle("8 Week Aggregation")
+# 
+# Fig5_top<-cowplot::plot_grid(Fig5A, Fig5B, Fig5C, nrow=1, labels="AUTO")
+# Fig5<-cowplot::plot_grid(Fig5_top, Fig5D, nrow=2, labels=c("","D"))
+# Fig5
+
+### alternatively-- rolling/smoothing without downsampling 
+fore_md_rolling<-data.frame(sampling_frequency=integer(365), forecastability=numeric(365))
+
+for (i in 1:56){
+  md_temp<-md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= zoo::rollsum(value, k = i, align = "right", fill = NA)) %>% 
+    mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y)
+  fore_flu_temp<- as.numeric(Omega(md_temp$lag_y, spectrum.control = sc, entropy.control = ec))
+  fore_md_rolling$sampling_frequency[i]=i
+  fore_md_rolling$forecastability[i]=fore_flu_temp
+}
+
+md_temp %>% ggplot(aes(days,rolling_sum)) + geom_point()+geom_line() + theme_classic() +xlab("Days")+ylab("")
+
+
+Fig5D<- fore_md_rolling %>% filter(sampling_frequency !=0) %>% ggplot(aes(sampling_frequency, forecastability))+ geom_point() + theme_classic()+
+    geom_smooth(aes(sampling_frequency, forecastability), method="gam", formula= y~s(x, bs = "cs"))+ 
+   xlab("Rolling Sum (Days)")+
+   ylab(expression(paste("Forecastability (",  Omega, ") (%)")))
+
+
+Fig5A<-md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= value)  %>% mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y) %>% ggplot(aes(days,rolling_sum)) +geom_line() + theme_classic() +xlab("Days")+ylab("Incident Hospital Admissions")+
+  ggtitle("Daily Reporting") 
+
+Fig5B<-md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= zoo::rollsum(value, k = 28, align = "right", fill = NA))   %>% mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y) %>% ggplot(aes(days,rolling_sum)) +geom_line() +  theme_classic() +xlab("Days")+ylab("")+
+  ggtitle("28 Day Rolling Sum")
+
+Fig5C<- md_flu %>% mutate(days=as.numeric(days)) %>% mutate(rolling_sum= zoo::rollsum(value, k = 56, align = "right", fill = NA))  %>% mutate(lag_y= rolling_sum-lag(rolling_sum)) %>% drop_na(lag_y) %>% ggplot(aes(days,rolling_sum)) +geom_line() +  theme_classic() +xlab("Days")+ylab("")+
+  ggtitle("56 Day Rolling Sum")
+
+Fig5_top<-cowplot::plot_grid(Fig5A, Fig5B, Fig5C, nrow=1, labels="AUTO")
+Fig5<-cowplot::plot_grid(Fig5_top, Fig5D, nrow=2, labels=c("","D"))
+Fig5
+
+
+```
 
 ## Figure 3
 ```{r fig3}
