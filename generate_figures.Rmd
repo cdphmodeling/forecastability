@@ -268,7 +268,20 @@ Fig2B<- hcai_state_omega %>% mutate(season_dummy=season) %>%
   theme(legend.position="bottom")+
   ylim(c(0,45))
 
-cowplot::plot_grid(Fig2A, Fig2B, ncol=1, labels="AUTO", align="h")
+Fig2_inset<- hcai_combined %>% filter(season %in% c("2017-2018", "2018-2019", "2019-2020", "2021-2022")) %>% ggplot(aes(x=log(pop), y=omega, col=season)) +
+  geom_point()+ 
+  theme_classic()+  
+  geom_smooth(aes(fill=season), method="gam", formula= y~s(x, bs = "cs"))+
+  scale_color_manual(name = "Season", values=col_season)+
+  scale_fill_manual(name = "Season", values=col_season)+
+  theme(legend.position="none", axis.title = element_blank())+
+  xlim(c(10,14))+
+  ylim(c(8,22))
+
+
+Fig2_main<- cowplot::plot_grid(Fig2A, Fig2B, ncol=1, labels="AUTO", align="h")
+Fig2 <- ggdraw(Fig2_main) +
+      draw_plot(Fig2_inset, x = 0.1, y = 0.75, width = 0.35, height = 0.25)
 ```
 
 ## Figure 4: Sampling Frequency
