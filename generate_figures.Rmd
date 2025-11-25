@@ -8,7 +8,7 @@ output:
     toc_float: true
 ---
 
-Code to reproduce figure and table results in manuscripts. Can be run sequentially after `load_data.R`, `calculate_forecastability.Rmd`, and `forecast_eval.Rmd` or as a standalone using output already saved locally to the `/results` folder for convenience.
+Code to reproduce figure and table results in manuscript. Can be run sequentially after `load_data.R`, `calculate_forecastability.Rmd`, and `forecast_eval.Rmd` or as a standalone using output already saved locally to the `/results` folder for convenience.
 
 ## Setup
 
@@ -487,6 +487,43 @@ Fig3 <-cowplot::plot_grid(Fig3A, Fig3B, Fig3C, Fig3D, ncol=1, labels="AUTO")
 Fig3
 ```
 
+## Figure 6?. Forecast coverage
+```{r}
+Fig6A<-forecastability %>% 
+  dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%
+  ggplot(aes(x=omega, y=interval_coverage_50, col=model)) + 
+  facet_grid(season~disease) + 
+  geom_point() +
+   geom_smooth(aes(fill=model), method = "lm", se = TRUE)+
+   theme_classic()+
+# theme(legend.position = "none")+
+    xlab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  ylab("Interval Coverage (50%)")+
+    scale_color_manual(name = "Model", values=col_models)+
+      scale_fill_manual(name = "Model", values=col_models)+
+  geom_hline(yintercept = 0.5, linetype= "dashed")
+
+Fig6B<-forecastability %>% 
+  dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%
+  ggplot(aes(x=omega, y=interval_coverage_90, col=model)) + 
+  facet_grid(season~disease) + 
+  geom_point() +
+   geom_smooth(aes(fill=model), method = "lm", se = TRUE)+
+   theme_classic()+
+# theme(legend.position = "none")+
+    xlab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  ylab("Interval Coverage (90%)")+
+    scale_color_manual(name = "Model", values=col_models)+
+      scale_fill_manual(name = "Model", values=col_models)+
+  geom_hline(yintercept = 0.9, linetype= "dashed")
+  
+
+Fig6 <-cowplot::plot_grid(Fig6A, Fig6B, ncol=1, labels="AUTO")
+Fig6
+```
+
+
+
 ## Supplementary Figure 2
 ```{r sup-fig2}
 
@@ -580,6 +617,42 @@ write_csv(lm_results, "results/lm_results_MMWR.csv")
 write_csv(lm_results_skill, "results/lm_results_skill_MMWR.csv")
 
 ```
+
+## Supplementary Table 1: Coverage
+
+```{r table1}
+forecastability_nested <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest()
+
+ lm_coverage50 <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest() %>%
+   mutate(data = map(data, ~ .x %>%
+                    summarise(model = list(broom::tidy(lm(interval_coverage_50 ~ omega)))))) %>% 
+   unnest %>% 
+   unnest
+ 
+ lm_coverage90 <- forecastability %>%
+  group_by(model, season, disease) %>%
+  nest() %>%
+   mutate(data = map(data, ~ .x %>%
+                    summarise(model = list(broom::tidy(lm(interval_coverage_90 ~ omega)))))) %>% 
+   unnest %>% 
+   unnest
+ 
+
+write_csv(lm_coverage50, "results/lm_coverage50_MMWR.csv")
+write_csv(lm_coverage90, "results/lm_coverage90_MMWR.csv")
+
+lm_coverage50 %>% mutate(metric="Interval Coverage (50%)") %>% bind_rows(lm_coverage90 %>% mutate(metric="Interval Coverage (90%)")) %>% 
+  filter(model %in% c("Ensemble", "Baseline"), term=="omega") %>%
+  relocate(metric, disease, model, season) %>% arrange(metric, disease, model, season) %>%
+  dplyr::select(!term) %>% 
+  mutate_if(is.numeric, signif, 3)
+
+```
+
 
 ## Session Info
 ```{r session-info}
