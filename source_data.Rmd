@@ -588,7 +588,7 @@ FluSight23<-FluSight_ensemble23 %>%
 FluSight<- FluSight22 %>% bind_rows(FluSight23) %>% mutate(disease="Influenza")
 comb_fc<-FluSight %>% bind_rows(COVIDHub_combo)
 write_csv(comb_fc, "data/raw_forecasts.csv")
-arrow::write_parquet(comb_fc, "data/raw_forecasts.gz. parquet", compression = "gzip", compression_level = 9)
+arrow::write_parquet(comb_fc, "data/raw_forecasts.gz.parquet", compression = "gzip", compression_level = 9)
 
 
 # alternative for when saving MMWR season dates
