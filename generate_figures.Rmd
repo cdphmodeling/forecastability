@@ -48,6 +48,10 @@ if(!exists("forecastability")) {
   forecastability<-read_csv("results/forecastability_results_MMWR.csv")
 }
 
+if(!exists("forecastability_horizon")) {
+  forecastability<-read_csv("results/forecastability_results_horizon_MMWR.csv")
+}
+
 if(!exists("combo")) {
   combo<-read_csv("results/combo_omega.csv")
 }
@@ -488,7 +492,7 @@ Fig3
 ```
 
 ## Figure 6?. Forecast coverage
-```{r}
+```{r figure6}
 Fig6A<-forecastability %>% 
   dplyr::filter(model %in% c("Baseline", "Ensemble")) %>%
   ggplot(aes(x=omega, y=interval_coverage_50, col=model)) + 
@@ -520,6 +524,25 @@ Fig6B<-forecastability %>%
 
 Fig6 <-cowplot::plot_grid(Fig6A, Fig6B, ncol=1, labels="AUTO")
 Fig6
+```
+
+## Figure 7? Forecastability vs. horizon
+```{r figure7-horizon}
+
+Fig7<-forecastability_horizon %>%
+  dplyr::filter(model == "Ensemble") %>%  ggplot(aes(x=omega, y=wis_scaled_relative_skill, col=season)) + 
+  facet_grid(horizon~ disease) + 
+  geom_point() +
+   geom_smooth(aes(fill=season), method = "lm", se = TRUE)+
+   theme_classic()+
+    scale_color_manual(name = "Season", values=col_season)+
+      scale_fill_manual(name = "Season", values=col_season)+
+# theme(legend.position = "none")+
+      xlab(expression(paste("Forecastability (",  Omega, ") (%)")))+
+  ylab("Scaled Relative Skill")
+
+Fig7
+
 ```
 
 
@@ -618,9 +641,33 @@ write_csv(lm_results_skill, "results/lm_results_skill_MMWR.csv")
 
 ```
 
-## Supplementary Table 1: Coverage
+## Table 2: Linear model results for forecastability vs. cadence
 
-```{r table1}
+```{r table2}
+cadence_nested<- cadence %>% filter(season %notin% c("2022-2024"))  %>% 
+  group_by(disease, cadence, season) %>%
+  nest()
+
+ lm_cadence <- cadence_nested%>%
+   mutate(data = map(data, ~ .x %>%
+                    summarise(model = list(broom::tidy(lm(omega ~ pop)))))) %>% 
+   unnest %>% 
+   unnest
+ 
+write_csv(lm_cadence, "results/lm_cadence_MMWR.csv")
+
+### Output for Table 2
+lm_cadence %>% filter( term=="pop") %>%
+  relocate(cadence, disease,  season) %>% arrange(cadence, disease,  season) %>%
+  dplyr::select(!term) %>% 
+  mutate_if(is.numeric, signif, 3)
+
+```
+
+
+## Table S1: Coverage
+
+```{r table-S1}
 forecastability_nested <- forecastability %>%
   group_by(model, season, disease) %>%
   nest()
