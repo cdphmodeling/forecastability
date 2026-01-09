@@ -28,9 +28,14 @@ data(state_census)
 
 covid_start<- as.Date("2020-08-03") # all states start reporting
 flu_start<- as.Date("2022-02-02") #mandated flu reporting starts
-season22_start<- as.Date("2022-07-01") # as.Date("2022-10-02") # Beginning of week 40 for 2022-2023 season
-season23_start<- as.Date("2023-07-01") # as.Date("2023-10-01") # Beginning of week 40 for 2023-2024 season
-season24_end<- as.Date("2024-04-30") #End of mandatory NHSN reporting period in 2024
+season22_start<-  as.Date("2022-10-02") # Beginning of week 40 for 2022-2023 season
+#as.Date("2022-07-01")
+season23_start<- as.Date("2023-10-01")  # Beginning of week 40 for 2023-2024 season
+#as.Date("2023-07-01") 
+season23_end<- as.Date("2024-04-30") #End of mandatory NHSN reporting period in 2024
+season24_start<- as.Date("2024-11-01") #Restart of mandatory reporting
+season24_end_MMWR<- MMWRweek2Date(2025, 39, 7) #End of 2024-2025 season
+season25_end_MMWR<- MMWRweek2Date(2026, 39, 7) #End of 2025-2026 season
 
 confidence<- 0.01 #alpha for kpss & adf stationarity testing
 
@@ -54,9 +59,9 @@ ec <- list(prior.weight = 1e-2)
 ```
 
 
-## State & National Scale
+## State & National Scale: Evaluat forecastability
 
-### Evaluate "forecastability" for COVID time series
+### COVID-19
 
 First check if time series need to be differenced to satisfy stationary assumption. (Yes, they do). Then difference and calculate Omega aka "forecastability" based on the `foreCA` package. 
 
@@ -91,8 +96,8 @@ for(i in 1:length(unique(covid_hosp_full$geo_value))){
    diff_df$ndiff3_kpss[i]<- covid_hosp_full %>% 
        arrange(time_value, geo_value) %>%
           # mutate(weekly_hosp=log(weekly_hosp)) %>% 
-    filter(time_value >=season22_start & time_value <= season24_end) %>%
-     filter(time_value <= season24_end) %>%
+    filter(time_value >=season22_start & time_value <= season23_end) %>%
+     filter(time_value <= season23_end) %>%
      filter(geo_value==unique(covid_hosp_full$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
   
@@ -112,8 +117,8 @@ for(i in 1:length(unique(covid_hosp_full$geo_value))){
       diff_df$ndiff3_adf[i]<- covid_hosp_full %>% 
           arrange(time_value, geo_value) %>%
              # mutate(weekly_hosp=log(weekly_hosp)) %>% 
-    filter(time_value >=season22_start & time_value <= season24_end) %>%
-     filter(time_value <= season24_end) %>%
+    filter(time_value >=season22_start & time_value <= season23_end) %>%
+     filter(time_value <= season23_end) %>%
         filter(geo_value==unique(covid_hosp_full$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
 }
@@ -160,9 +165,7 @@ ts_complete<-covid_hosp_full  %>%
   dplyr::select(geo_value, time_value, diff) %>% 
   drop_na(diff) %>%
   pivot_wider(names_from=geo_value, values_from = diff) %>%
-  filter(time_value>=season22_start+7 & time_value<=season24_end)
-
-
+  filter(time_value>=season22_start+7 & time_value<=season23_end)
 
 
 spec <- Omega(ts_complete %>% dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
@@ -172,8 +175,6 @@ spec22<- Omega(ts_raw %>%
 spec23<- Omega(ts_raw %>% 
                  filter(time_value>=season23_start) %>% 
                  dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
-
-
 
 
 df <- data.frame(as.list(spec)) %>% pivot_longer(everything(), names_to="state", values_to="omega") %>%
@@ -232,8 +233,8 @@ for(i in 1:length(unique(covid_ds$geo_value))){
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
    
    diff_df$ndiff3_kpss[i]<- covid_ds %>% 
-    filter(time_value >=season22_start & time_value <= season24_end) %>%
-     #filter(time_value <= season24_end) %>%
+    filter(time_value >=season22_start & time_value <= season23_end) %>%
+     #filter(time_value <= season23_end) %>%
      filter(geo_value==unique(covid_ds$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
   
@@ -247,8 +248,8 @@ for(i in 1:length(unique(covid_ds$geo_value))){
     pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
    
       diff_df$ndiff3_adf[i]<- covid_ds %>% 
-    filter(time_value >=season22_start & time_value <= season24_end) %>%
-     # filter(time_value <= season24_end) %>%
+    filter(time_value >=season22_start & time_value <= season23_end) %>%
+     # filter(time_value <= season23_end) %>%
         filter(geo_value==unique(covid_ds$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
 }
@@ -317,7 +318,7 @@ state_covid_cadence<- state_covid %>% bind_rows(state_down_sampled) %>% mutate(l
 ```
 
 
-### Evaluate "forecastability" for influenza time series
+### Influenza
 
 #### Daily sampling of rolling weekly sum
 
@@ -347,7 +348,7 @@ for(i in 1:length(unique(flu_hosp_full$geo_value))){
    diff_df_flu$ndiff3_kpss[i]<- flu_hosp_full %>%
        arrange(time_value, geo_value) %>%
      # mutate(weekly_hosp=log(weekly_hosp)) %>% 
-    filter(time_value >=season22_start & time_value < season24_end) %>% filter(geo_value==unique(flu_hosp_full$geo_value)[i]) %>% 
+    filter(time_value >=season22_start & time_value < season23_end) %>% filter(geo_value==unique(flu_hosp_full$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
 
   
@@ -366,7 +367,7 @@ for(i in 1:length(unique(flu_hosp_full$geo_value))){
       diff_df_flu$ndiff3_adf[i]<- flu_hosp_full %>% 
           arrange(time_value, geo_value) %>%
         # mutate(weekly_hosp=log(weekly_hosp)) %>% 
-    filter(time_value >=season22_start & time_value < season24_end) %>% filter(geo_value==unique(flu_hosp_full$geo_value)[i]) %>% 
+    filter(time_value >=season22_start & time_value < season23_end) %>% filter(geo_value==unique(flu_hosp_full$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
 }
 diff_df_flu<- diff_df_flu %>% 
@@ -431,10 +432,10 @@ ts_flu_complete<-flu_hosp_full  %>%
   filter(time_value> season22_start+7) %>%
   arrange(time_value)
 
+
 spec_flu <- Omega(ts_flu_complete %>% dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
 spec_flu22<- Omega(ts_flu %>% filter(time_value >= season22_start & time_value<season23_start) %>% dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
 spec_flu23<- Omega(ts_flu %>% filter(time_value>=season23_start) %>% dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
-
 
 df_flu = data.frame(as.list(spec_flu)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
     mutate(state=case_when(state=="in."~"in",
@@ -453,7 +454,6 @@ df_flu23<- data.frame(as.list(spec_flu23)) %>% pivot_longer(everything(), names_
   mutate(season="2023-2024")
 
 state_flu<- df_flu %>% bind_rows(df_flu22, df_flu23) %>% mutate(cadence="Daily", location_level="state")
-
 
 
 state_flu %>% ggplot(aes(log(pop), omega)) + geom_point() + facet_wrap(season~.)
@@ -493,7 +493,7 @@ for(i in 1:length(unique(flu_ds$geo_value))){
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
    
    diff_df_flu_weekly$ndiff3_kpss[i]<- flu_ds %>% 
-    filter(time_value >=season22_start & time_value < season24_end) %>%
+    filter(time_value >=season22_start & time_value < season23_end) %>%
        mutate(.day= lubridate::wday(time_value, label = TRUE)) %>% 
   filter(.day=="Sat") %>% #down sample to weekly
      filter(geo_value==unique(flu_ds$geo_value)[i]) %>% 
@@ -514,7 +514,7 @@ for(i in 1:length(unique(flu_ds$geo_value))){
     pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
    
       diff_df_flu_weekly$ndiff3_adf[i]<- flu_ds %>% 
-    filter(time_value >=season22_start & time_value < season24_end) %>% filter(geo_value==unique(flu_ds$geo_value)[i]) %>% 
+    filter(time_value >=season22_start & time_value < season23_end) %>% filter(geo_value==unique(flu_ds$geo_value)[i]) %>% 
           mutate(.day= lubridate::wday(time_value, label = TRUE)) %>% 
   filter(.day=="Sat") %>% #down sample to weekly
     pull(weekly_hosp) %>% ndiffs(test="adf", alpha=confidence)
@@ -580,6 +580,7 @@ state_flu_cadence<- state_flu %>% bind_rows(state_flu_weekly) %>% mutate(disease
 
 ```
 
+
 ## County-level admissions forecastability
 
 ### COVID-19 admissions
@@ -601,7 +602,7 @@ for(i in 1:length(unique(hosp_epi_df_county$geo_value))){
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
    
     diff_df_county$ndiff3_kpss[i]<- hosp_epi_df_county %>% 
-    filter(time_value >=season22_start & time_value <= season24_end) %>% filter(geo_value==unique(hosp_epi_df_county$geo_value)[i]) %>% 
+    filter(time_value >=season22_start & time_value <= season23_end) %>% filter(geo_value==unique(hosp_epi_df_county$geo_value)[i]) %>% 
     pull(weekly_hosp) %>% ndiffs(test="kpss", alpha=confidence)
   
   diff_df_county$ndiff_adf[i]<- hosp_epi_df_county %>% 
@@ -628,7 +629,7 @@ diff2_counties_all<- diff_df_county$county[which(diff_df_county$ndiff3==2)]
 
 #2020-2023
 ts_county<-hosp_epi_df_county %>%
-  filter(time_value <= season24_end, geo_value %notin% c("Calaveras", "Colusa", "Glenn", "Lassen", "Madera", "Mariposa", "Modoc", "Mono", "Plumas", "San Benito", "Santa Cruz",  "Siskiyou", "Sutter", "Trinity")) %>%
+  filter(time_value <= season23_end, geo_value %notin% c("Calaveras", "Colusa", "Glenn", "Lassen", "Madera", "Mariposa", "Modoc", "Mono", "Plumas", "San Benito", "Santa Cruz",  "Siskiyou", "Sutter", "Trinity")) %>%
   mutate(diff=case_when( geo_value %in% diff_counties22 ~ weekly_hosp-lag(weekly_hosp),
          .default=weekly_hosp)) %>% #ndiff=1
     mutate(diff=case_when(geo_value %in% diff2_counties22 ~ diff-lag(diff),
@@ -640,7 +641,7 @@ ts_county<-hosp_epi_df_county %>%
   filter(time_value >=season22_start)
 
 # ts_county<-hosp_epi_df_county %>% 
-#   filter(time_value <= season24_end, geo_value %notin% c("Calaveras", "Colusa", "Glenn", "Lassen", "Madera", "Mariposa", "Modoc", "Mono", "Plumas", "San Benito", "Santa Cruz",  "Siskiyou", "Sutter", "Trinity")) %>% 
+#   filter(time_value <= season23_end, geo_value %notin% c("Calaveras", "Colusa", "Glenn", "Lassen", "Madera", "Mariposa", "Modoc", "Mono", "Plumas", "San Benito", "Santa Cruz",  "Siskiyou", "Sutter", "Trinity")) %>% 
 #   mutate(diff=case_when( time_value<season23_start & geo_value %in% diff_counties22 ~ weekly_hosp-lag(weekly_hosp),
 #       time_value>=season23_start & geo_value %in% diff_counties23 ~ weekly_hosp-lag(weekly_hosp),
 #          .default=weekly_hosp)) %>% #ndiff=1
@@ -655,7 +656,7 @@ ts_county<-hosp_epi_df_county %>%
 
 #2020-2024
 ts_county_complete<-hosp_epi_df_county %>% 
-  filter(time_value <= season24_end, geo_value %notin% c("Calaveras", "Colusa", "Glenn", "Lassen", "Madera", "Mariposa", "Modoc", "Mono", "Plumas", "San Benito", "Santa Cruz",  "Siskiyou", "Sutter", "Trinity")) %>% 
+  filter(time_value <= season23_end, geo_value %notin% c("Calaveras", "Colusa", "Glenn", "Lassen", "Madera", "Mariposa", "Modoc", "Mono", "Plumas", "San Benito", "Santa Cruz",  "Siskiyou", "Sutter", "Trinity")) %>% 
   mutate(diff=case_when( geo_value %in% diff_counties_all ~ weekly_hosp-lag(weekly_hosp),
          .default=weekly_hosp)) %>% #ndiff=1
     mutate(diff=case_when(geo_value %in% diff2_counties_all ~ diff-lag(diff),
@@ -671,7 +672,7 @@ ts_county_complete<-hosp_epi_df_county %>%
 #
 # for(i in county_list){
 # ts_county<-hosp_epi_df_county %>%
-#   filter(time_value <= season24_end, geo_value==i) %>%
+#   filter(time_value <= season23_end, geo_value==i) %>%
 #    mutate(diff=case_when(geo_value %in% diff_counties_flu ~ weekly_hosp-lag(weekly_hosp),
 #          .default= weekly_hosp)) %>% # diff only those counties that have a kpss recommendation of lag=1
 #   dplyr::select(geo_value, time_value, diff) %>%
@@ -735,17 +736,17 @@ for(i in 1:length(unique(hosp_epi_df_county_flu$geo_value))){
   filter(geo_value==unique(hosp_epi_df_county_flu$geo_value)[i]) %>% pull(weekly_hosp) %>% ndiffs(test="kpss", alpha = 0.01)
   
   diff_df_county_flu$ndiff2_adf[i]<- hosp_epi_df_county_flu %>%
-  filter(time_value >=season23_start & time_value <= season24_end) %>%
+  filter(time_value >=season23_start & time_value <= season23_end) %>%
   filter(geo_value==unique(hosp_epi_df_county_flu$geo_value)[i]) %>% pull(weekly_hosp) %>% ndiffs(test="adf", alpha = 0.01)
   diff_df_county_flu$ndiff2_kpss[i]<- hosp_epi_df_county_flu %>%
-  filter(time_value >=season23_start & time_value <= season24_end) %>%
+  filter(time_value >=season23_start & time_value <= season23_end) %>%
   filter(geo_value==unique(hosp_epi_df_county_flu$geo_value)[i]) %>% pull(weekly_hosp) %>% ndiffs(test="kpss", alpha = 0.01)
   
   diff_df_county_flu$ndiff3_adf[i]<- hosp_epi_df_county_flu %>%
-  filter(time_value >=season22_start & time_value <= season24_end) %>%
+  filter(time_value >=season22_start & time_value <= season23_end) %>%
   filter(geo_value==unique(hosp_epi_df_county_flu$geo_value)[i]) %>% pull(weekly_hosp) %>% ndiffs(test="adf", alpha = 0.01)
   diff_df_county_flu$ndiff3_kpss[i]<- hosp_epi_df_county_flu %>%
-  filter(time_value >=season22_start & time_value <= season24_end) %>%
+  filter(time_value >=season22_start & time_value <= season23_end) %>%
   filter(geo_value==unique(hosp_epi_df_county_flu$geo_value)[i]) %>% pull(weekly_hosp) %>% ndiffs(test="kpss", alpha = 0.01)
   
   
@@ -763,7 +764,7 @@ diff2_counties_flu_all<- diff_df_county_flu$county[which(diff_df_county_flu$ndif
 
 #2022-2023
 ts_county_flu<-hosp_epi_df_county_flu %>% 
-  filter(time_value <= season24_end, geo_value %notin% c("Amador", "Calaveras", "Colusa", "Del Norte", "Glenn", "Humboldt", "Inyo", "Lake", "Lassen", "Madera", "Mariposa", "Mendocino", "Modoc", "Mono", "Nevada", "Plumas", "San Benito", "Santa Cruz", "Siskiyou", "Sutter", "Trinity")) %>%
+  filter(time_value <= season23_end, geo_value %notin% c("Amador", "Calaveras", "Colusa", "Del Norte", "Glenn", "Humboldt", "Inyo", "Lake", "Lassen", "Madera", "Mariposa", "Mendocino", "Modoc", "Mono", "Nevada", "Plumas", "San Benito", "Santa Cruz", "Siskiyou", "Sutter", "Trinity")) %>%
    mutate(diff=case_when(geo_value %in% diff_counties_flu22 ~ weekly_hosp-lag(weekly_hosp),
    .default= weekly_hosp)) %>% #ndiff=1
   mutate(diff=case_when(geo_value %in% diff2_counties_flu22 ~ diff-lag(diff),
@@ -775,7 +776,7 @@ ts_county_flu<-hosp_epi_df_county_flu %>%
   filter(time_value>=season22_start)
 
 # ts_county_flu<-hosp_epi_df_county_flu %>% 
-#   filter(time_value <= season24_end, geo_value %notin% c("Amador", "Calaveras", "Colusa", "Del Norte", "Glenn", "Humboldt", "Inyo", "Lake", "Lassen", "Madera", "Mariposa", "Mendocino", "Modoc", "Mono", "Nevada", "Plumas", "San Benito", "Santa Cruz", "Siskiyou", "Sutter", "Trinity")) %>%
+#   filter(time_value <= season23_end, geo_value %notin% c("Amador", "Calaveras", "Colusa", "Del Norte", "Glenn", "Humboldt", "Inyo", "Lake", "Lassen", "Madera", "Mariposa", "Mendocino", "Modoc", "Mono", "Nevada", "Plumas", "San Benito", "Santa Cruz", "Siskiyou", "Sutter", "Trinity")) %>%
 #    mutate(diff=case_when(geo_value %in% diff_counties_flu22 & time_value< season23_start ~ weekly_hosp-lag(weekly_hosp),
 #    geo_value %in% diff_counties_flu23 & time_value>= season23_start ~ weekly_hosp-lag(weekly_hosp),
 #    .default= weekly_hosp)) %>% #ndiff=1
@@ -790,7 +791,7 @@ ts_county_flu<-hosp_epi_df_county_flu %>%
 
 #2022-2024
 ts_county_flu_complete<-hosp_epi_df_county_flu %>% 
-  filter(time_value <= season24_end, geo_value %notin% c("Amador", "Calaveras", "Colusa", "Del Norte", "Glenn", "Humboldt", "Inyo", "Lake", "Lassen", "Madera", "Mariposa", "Mendocino", "Modoc", "Mono", "Nevada", "Plumas", "San Benito", "Santa Cruz", "Siskiyou", "Sutter", "Trinity")) %>%
+  filter(time_value <= season23_end, geo_value %notin% c("Amador", "Calaveras", "Colusa", "Del Norte", "Glenn", "Humboldt", "Inyo", "Lake", "Lassen", "Madera", "Mariposa", "Mendocino", "Modoc", "Mono", "Nevada", "Plumas", "San Benito", "Santa Cruz", "Siskiyou", "Sutter", "Trinity")) %>%
    mutate(diff=case_when(geo_value %in% diff_counties_flu_all  ~ weekly_hosp-lag(weekly_hosp),
    .default= weekly_hosp)) %>% #ndiff=1
   mutate(diff=case_when( geo_value %in% diff2_counties_all ~ diff-lag(diff),
@@ -893,6 +894,132 @@ hcai_state_omega<-read_csv("results/hcai_state_omega.csv")
 hcai_burden<-read_csv("results/hcai_burden.csv")
 ```
 
+## NSSP ED visits
+### COVID-19
+```{r covid-nssp}
+
+#time series for 2022-2023 & 2023-2024
+
+nssp_raw<-ed_covid%>%
+    arrange(time_value, geo_value) %>%
+  group_by(geo_value) %>%
+  mutate(diff = value-lag(value)) %>%
+  filter(geo_value!="wy") %>% #exclude wyoming which stops reporting mid summer 2024
+  dplyr::select(geo_value, time_value, diff) %>%
+  drop_na(diff) %>%
+  pivot_wider(names_from=geo_value, values_from = diff) %>%
+  filter(time_value>=season22_start+7)
+
+
+spec22<- Omega(nssp_raw %>%
+                 filter(time_value >= season22_start & time_value< season23_start) %>%
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+spec23<- Omega(nssp_raw %>%
+                 filter(time_value>=season23_start & time_value< MMWRweek2Date(2024,39,7)) %>%
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+spec24<- Omega(nssp_raw %>%
+                 filter(time_value>=MMWRweek2Date(2024,39,7) & time_value<season24_end_MMWR) %>%
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+spec25<- Omega(nssp_raw %>%
+                 filter(time_value>=season24_end_MMWR & time_value<season25_end_MMWR) %>%
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+
+
+df22<- data.frame(as.list(spec22)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2022-2023")
+df23<- data.frame(as.list(spec23)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2023-2024")
+df24<- data.frame(as.list(spec24)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2024-2025")
+df25<- data.frame(as.list(spec25)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2025-2026")
+
+
+covid_ed_visits<- df22 %>% bind_rows( df23, df24)
+covid_ed_visits %>% ggplot(aes(log(pop), omega)) + 
+  geom_point() + 
+  facet_wrap(season~.)+ 
+  geom_smooth(method="lm")+
+  theme_classic()
+
+```
+
+### Influenza
+```{r flu-nssp}
+
+#time series for 2022-2023 & 2023-2024
+nssp_raw<-ed_flu %>%
+    arrange(time_value, geo_value) %>%
+  group_by(geo_value) %>%
+  mutate(diff = value-lag(value)) %>%
+  filter(geo_value!="wy") %>% #exclude wyoming which stops reporting mid summer 2024
+  dplyr::select(geo_value, time_value, diff) %>%
+  drop_na(diff) %>%
+  pivot_wider(names_from=geo_value, values_from = diff) %>%
+  filter(time_value>=season22_start+7)
+
+
+spec22<- Omega(nssp_raw %>% 
+                 filter(time_value >= season22_start & time_value< season23_start) %>% 
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+spec23<- Omega(nssp_raw %>% 
+                 filter(time_value>=season23_start & time_value<season23_end) %>% 
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+spec24<- Omega(nssp_raw %>% 
+                 filter(time_value>=season24_start & time_value<season24_end_MMWR) %>% 
+                 dplyr::select(-time_value, us), spectrum.control = sc, entropy.control = ec)
+spec25<- Omega(nssp_raw %>%
+                 filter(time_value>=season24_end_MMWR & time_value<season25_end_MMWR) %>%
+                 dplyr::select(-time_value), spectrum.control = sc, entropy.control = ec)
+
+
+
+
+df22<- data.frame(as.list(spec22)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2022-2023")
+df23<- data.frame(as.list(spec23)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2023-2024")
+df24<- data.frame(as.list(spec24)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2024-2025")
+df25<- data.frame(as.list(spec25)) %>% pivot_longer(everything(), names_to="state", values_to="omega")  %>%
+    mutate(state=case_when(state=="in."~"in",
+                         TRUE~state)) %>%
+  left_join(state_census %>% dplyr::select(pop=POPESTIMATE2019, state=ABBR) %>% mutate(state=tolower(state)), by = "state") %>%
+  mutate(season="2025-2026")
+
+flu_ed_visits<- df22 %>% bind_rows( df23, df24)
+flu_ed_visits %>% ggplot(aes(log(pop), omega)) + 
+  geom_point() + 
+  facet_wrap(season~.)+ 
+  geom_smooth(method="lm")+
+  theme_classic()
+
+ed_omega<- flu_ed_visits %>% mutate(disease="Influenza") %>% bind_rows(covid_ed_visits %>% mutate(disease="COVID-19"))
+
+write_csv(ed_omega, "results/ed_omega.csv")
+
+```
 
 ## Session Info
 
