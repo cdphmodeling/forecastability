@@ -5,7 +5,7 @@ in the manuscript **"Forecastability of infectious disease time series: are some
 Available at: https://medrxiv.org/cgi/content/short/2025.04.29.25326677v1
 
 ## Versioning
-The code was written in R Version 4.0.4. This repo uses `renv` (https://rstudio.github.io/renv/articles/renv.html) for reproducibility. Relevant files for this are: `renv.lock`, `.Rprofile`, `renv/settings.json` and `renv/activate.R`.
+The code was written in R Version 4.4.2. This repo uses `renv` (https://rstudio.github.io/renv/articles/renv.html) for reproducibility. Relevant files for this are: `renv.lock`, `.Rprofile`, `renv/settings.json` and `renv/activate.R`.
 If not prompted, make sure `renv` is installed and then run `renv::restore()` to download all necessary packages. 
 
 ## Repository structure
@@ -13,6 +13,7 @@ Repository contains the following folders:
 
 1. `/data` - data that is provided to run the scripts, loaded from running `load_data.R` script (and optionally downloaded using `source_data.Rmd`)
 2. `/results`- compiled results including forecastability scores and regression results produced via the `cacluate_forecastability.Rmd` and `forecast_eval.Rmd` scripts
+3. `/figures`- figures and tables produced using the `generate_figures.Rmd` script
 
 ## Scripts
 Raw results for the manuscript can be reproduced by running these scripts in the following order:
@@ -32,3 +33,4 @@ Raw results for the manuscript can be reproduced by running these scripts in the
     - COVID Hub forecasts: https://github.com/reichlab/covid19-forecast-hub
 - **Syndromic hospitalizations:** California county and state level syndromic influenza hospitalization data were derived the California Department of Healthcare Access and Information (HCAI) for the 2000-2022 respiratory virus seasons. Pre-processed data are available in: `results/hcai_burden.csv`, `results/hcai_combined.csv` and `results/hcai_state_omega.csv`
 - **Lab confirmed hospitalizations:** State and national, laboratory-confirmed, COVID-19 and influenza hospitalization admission data were obtained from HHS/NHSN via Delphi COVIDcast for the 2022-2024 respiratory virus seasons. These data are also publicly available through HHS/NHSN for state: https://healthdata.gov/Hospital/COVID-19-Reported-Patient-Impact-and-Hospital-Capa/g62h-syeh/about_data and facility-level time series:  https://healthdata.gov/Hospital/COVID-19-Reported-Patient-Impact-and-Hospital-Capa/anag-cw7u/about_data
+- **Percent emergency department (%ED) visits:** State and national %ED data were obtained from NSSP via Delphi COVIDcast for the 2022-2025 respiratory virus seasons. Percent ED visits are also publicly available data sets through NSSP: https://data.cdc.gov/Public-Health-Surveillance/NSSP-Emergency-Department-Visit-Trajectories-by-St/rdmq-nq56/about_data
