@@ -25,15 +25,18 @@ library(tsibble)
 library(MMWRweek)
 library(covidcast)
 library(RSocrata)
-library(epipredict)
+# library(epipredict)
 library(arrow)
+library(stringr)
 
-season22_start_MMWR<- as.Date("2022-10-02")  #Beginning of week 40 for 2022-2023 season
-season23_start_MMWR<- as.Date("2023-10-01") #Beginning of week 40 for 2023-2024 season
+season22_start_MMWR<- MMWRweek2Date(2022, 40, 1)  #Beginning of week 40 for 2022-2023 season
+season23_start_MMWR<- MMWRweek2Date(2023, 40, 1) #Beginning of week 40 for 2023-2024 season
 season22_start<-  as.Date("2022-07-01")
 season23_start<- as.Date("2023-07-01")
-season24_end<- as.Date("2024-04-30") #End of mandatory NHSN reporting period in 2024
-
+season23_end<- as.Date("2024-04-30") #End of mandatory NHSN reporting period in 2024
+season24_start<- as.Date("2024-11-01") #Restart of mandatory reporting
+season24_end_MMWR<- MMWRweek2Date(2025, 39, 7) #End of 2024-2025 season
+season25_end_MMWR<- MMWRweek2Date(2026, 39, 7) #End of 2025-2026 season
 ```
 
 
@@ -65,7 +68,7 @@ demog<-state_census %>% #note state_census object is loaded from epipredict pack
   na.omit() #omit US territories (e.g. Guam, Virgin Islands, Puerto Rico)
 
 write_csv(demog, "data/demog.csv")
-
+# demog<-read_csv("data/demog.csv")
 ```
 
 ## Load hospital capacity data
@@ -74,8 +77,10 @@ write_csv(demog, "data/demog.csv")
 beds_raw<- read.socrata("https://healthdata.gov/resource/g62h-syeh.csv", stringsAsFactors = FALSE)
 
 hosp_capacity<-beds_raw  %>% dplyr::select(state, date, inpatient_beds) %>% mutate(date=as.Date(date), state=tolower(state), year=year(date)) %>%
-  mutate(season= case_when(date>="2022-10-08" & date<"2023-10-07" ~ "2022-2023",
-                           date>="2023-10-07" & date< "2024-10-04" ~ "2023-2024",
+  mutate(season= case_when(date>=season22_start_MMWR & date<season23_start_MMWR ~ "2022-2023",
+                           date>=season23_start_MMWR & date< season23_end ~ "2023-2024",
+                           date>=season24_start & date< season24_end_MMWR ~ "2024-2025",
+                           date>=season24_end_MMWR & date< season25_end_MMWR ~ "2025-2026",
                            TRUE ~ NA)) %>%
            drop_na(season) %>%
            group_by(state, season) %>% summarize(inpatient_beds=mean(inpatient_beds, na.rm=TRUE))%>%
@@ -95,6 +100,7 @@ HHS_actuals_facility_raw <- read.socrata("https://healthdata.gov/resource/anag-c
 num_facilities<- HHS_actuals_facility_raw %>% select(hospital_pk, state, collection_week) %>% mutate(date=as.Date(collection_week), state=tolower(state)) %>%
   mutate(season= case_when(date>="2022-10-08" & date<"2023-10-07" ~ "2022-2023",
                            date>="2023-10-07" & date< "2024-10-04" ~ "2023-2024",
+                           date>="2024-10-05" & date< "2025-10-04" ~ "2024-2025",
                            TRUE ~ NA)) %>%
            drop_na(season) %>%
            group_by(state, season, date) %>% summarize(num_facilities=length(unique(hospital_pk))) %>%
@@ -114,6 +120,7 @@ https://cmu-delphi.github.io/delphi-epidata/
 ```{r load-data, class.source = 'fold-hide'}
 #options(covidcast.auth = "####") #if you register with covidcast
 
+#COVID
 hosp_covid <-covidcast_signal(data_source = "hhs",
                           signal = "confirmed_admissions_covid_1d",
                           start_day = "2020-01-01", end_day = Sys.Date(), geo_type=c("state"))
@@ -122,6 +129,8 @@ hosp_covid_us <-covidcast_signal(data_source = "hhs",
                           signal = "confirmed_admissions_covid_1d",
                           start_day = "2020-01-01", end_day = Sys.Date(), geo_type=c("nation"))
 
+
+#Influenza
 hosp_flu <-covidcast_signal(data_source = "hhs",
                           signal = "confirmed_admissions_influenza_1d",
                           start_day = "2022-02-02", end_day = Sys.Date(), geo_type=c("state"))
@@ -131,22 +140,24 @@ hosp_flu_us <-covidcast_signal(data_source = "hhs",
                           start_day = "2022-02-02", end_day = Sys.Date(), geo_type=c("nation"))
 
 
+
+
 hosp_epi_df <- hosp_covid %>% 
   bind_rows(hosp_covid_us) %>%
   dplyr::select(geo_value, time_value, value) %>%
-  filter(geo_value %notin% c("gu", "vi", "as", "pr")) %>% #exclude territories
-  left_join(state_census %>% dplyr::select(pop, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "geo_value") %>%
+  filter(geo_value %notin% c("gu", "vi", "as", "pr", "mp")) %>% #exclude territories
+  left_join(demog %>% dplyr::select(pop, geo_value=location)) %>%
   arrange(time_value, geo_value) %>%
   group_by(geo_value)%>%
   mutate(weekly_admits=zoo::rollsum(value, k = 7, align = "right", fill = NA)) %>% #create weekly hospital admissions from daily values (7-day rolling sum)
   mutate(weekly_admits_p100K = weekly_admits / pop * 100000) %>%  # convert to hosp / 100K pop
   drop_na(weekly_admits) %>% 
   filter(time_value<="2024-04-30") %>%
-  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits, weekly_admits_p100K) %>%
-  as_epi_df(.,
-  geo_type = "state",
-  time_type = "day",
-  as_of = max(hosp_covid$issue)) 
+  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits, weekly_admits_p100K) #%>%
+  # as_epi_df(.,
+  # geo_type = "state",
+  # time_type = "day",
+  # as_of = max(hosp_covid$issue)) 
 
 
 hosp_epi_df %>% ggplot(aes(time_value, weekly_hosp))+ 
@@ -155,27 +166,10 @@ hosp_epi_df %>% ggplot(aes(time_value, weekly_hosp))+
   theme_classic()+
   ggtitle("COVID Weekly Hospitalizations per 100K")
 
-hosp_epi_df_raw <- hosp_covid %>% 
-  bind_rows(hosp_covid_us) %>%
-  dplyr::select(geo_value, time_value, value) %>%
-  filter(geo_value %notin% c("gu", "vi", "as", "pr")) %>%  #exclude territories
-  left_join(state_census %>% dplyr::select(pop, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "geo_value") %>%
-  arrange(time_value, geo_value) %>%
-  group_by(geo_value)%>%
-  mutate(weekly_admits=value) %>% #create weekly hospital admissions from daily values (7-day rolling sum)
-  drop_na(weekly_admits) %>% 
-  filter(time_value<="2024-04-30") %>%
-  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits) %>%
-  as_epi_df(.,
-  geo_type = "state",
-  time_type = "day",
-  as_of = max(hosp_covid$issue)) 
-
-
 hosp_epi_df_flu <- hosp_flu %>% 
   bind_rows(hosp_flu_us) %>%
   dplyr::select(geo_value, time_value, value) %>%
-  filter(geo_value %notin% c("gu", "vi", "as", "pr")) %>% #exclude territories
+  filter(geo_value %notin% c("gu", "vi", "as", "pr", "mp")) %>% #exclude territories
   left_join(state_census %>% dplyr::select(pop, geo_value=abbr) %>% mutate(geo_value=tolower(geo_value)), by = "geo_value") %>%
   arrange(time_value, geo_value) %>%
   group_by(geo_value)%>%
@@ -183,11 +177,11 @@ hosp_epi_df_flu <- hosp_flu %>%
   mutate(weekly_admits_p100K= weekly_admits / pop * 100000) %>%  # convert to hosp / 100K pop
   drop_na(weekly_admits) %>% 
   filter(time_value<="2024-04-30") %>%
-  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits, weekly_admits_p100K) %>%
-  as_epi_df(.,
-  geo_type = "state",
-  time_type = "day",
-  as_of = max(hosp_flu$issue)) 
+  dplyr::select(geo_value, time_value, weekly_hosp = weekly_admits, weekly_admits_p100K) #%>%
+  # as_epi_df(.,
+  # geo_type = "state",
+  # time_type = "day",
+  # as_of = max(hosp_flu$issue)) 
 
 
 hosp_epi_df_flu %>% ggplot(aes(time_value, weekly_hosp))+ geom_line() + facet_wrap(geo_value ~., scales="free") + theme_classic()+ 
@@ -213,13 +207,6 @@ covid_hosp_full <- hosp_epi_df %>%
   mutate(weekly_admits_p100K = replace_na(weekly_admits_p100K, 0)) %>%
   ungroup()
 
-covid_hosp_full_raw <- hosp_epi_df_raw  %>%
-  complete(time_value = full_seq(time_value, 1)) %>%
-  group_by(geo_value) %>%
-  arrange(time_value) %>% # possibly unnecessary, but good insurance
-  tidyr::fill(weekly_hosp) %>% # first, try locf
-  mutate(weekly_hosp = replace_na(weekly_hosp, 0)) %>%
-  ungroup()
 
 flu_hosp_full <- hosp_epi_df_flu %>%
   complete(time_value = full_seq(time_value, 1)) %>%
@@ -234,6 +221,7 @@ flu_hosp_full <- hosp_epi_df_flu %>%
 
 write_csv(covid_hosp_full, "data/covid_hosp.csv")
 write_csv(flu_hosp_full, "data/flu_hosp.csv")
+
 ```
 
 ### Total season burden
@@ -313,6 +301,26 @@ Read in weekly county actuals at facility level; filter to `state == CA`
 # write_csv(hosp_epi_df_county_flu, "data/flu_hosp_county.csv")
 
 ```
+
+## NSSP ED visits
+```{r}
+ed_covid_us<- read_csv("data/covidcast-nssp-pct_ed_visits_covid-202239-to-202552_us.csv")
+ed_covid_states<- read_csv("data/covidcast-nssp-pct_ed_visits_covid-202239-to-202552_states.csv")
+ed_covid<-ed_covid_us %>% bind_rows(ed_covid_states) %>% dplyr::select(-`...1`) %>%
+  mutate(year=as.numeric(str_sub(time_value, start = 1, end = 4)), week=as.numeric(str_sub(time_value, start = 5)), end_of_week_date=MMWRweek2Date(year, week, 7)) %>%
+  dplyr::select(geo_value, time_value=end_of_week_date, value)
+
+ed_flu_us<- read_csv("data/covidcast-nssp-pct_ed_visits_influenza-202239-to-202552_us.csv")
+ed_flu_states<- read_csv("data/covidcast-nssp-pct_ed_visits_influenza-202239-to-202552_states.csv")
+ed_flu<-ed_flu_us %>% bind_rows(ed_flu_states) %>% dplyr::select(-`...1`) %>%
+  mutate(year=as.numeric(str_sub(time_value, start = 1, end = 4)), week=as.numeric(str_sub(time_value, start = 5)), end_of_week_date=MMWRweek2Date(year, week, 7)) %>%
+  dplyr::select(geo_value, time_value=end_of_week_date, value)
+
+write_csv(ed_covid, "data/ed_covid.csv")
+write_csv(ed_flu, "data/ed_flu.csv")
+
+```
+
 
 ## Forecast Actuals for Scoring
 
@@ -510,7 +518,7 @@ COVID_hub_files<-grab_covid_models()
 COVIDHub_combo<- COVID_hub_files %>% 
   filter(grepl("inc hosp", target), forecast_date >=season22_start, type=="quantile") %>%
   mutate(season= case_when(target_end_date>=season22_start & target_end_date<season23_start ~ "2022-2023",
-                           target_end_date>=season23_start & target_end_date< season24_end ~ "2023-2024",
+                           target_end_date>=season23_start & target_end_date< season23_end ~ "2023-2024",
                            TRUE ~ NA)) %>%
            drop_na(season) %>%
   mutate(target_end_date=as.Date(target_end_date), forecast_date=as.Date(forecast_date)) %>%
@@ -569,7 +577,7 @@ FluSight23<-FluSight_ensemble23 %>%
   mutate(output_type_id=as.numeric(as.character(output_type_id)), target="wk inc hosp") %>%
   rename(prediction=value, model=scenario) %>% 
   mutate(target_end_date=as.Date(target_end_date), forecast_date=as.Date(reference_date)) %>%
-  filter(target_end_date>=season23_start & target_end_date< season24_end) %>%
+  filter(target_end_date>=season23_start & target_end_date< season23_end) %>%
   left_join(CDC_actuals, by=c("target_end_date", "location")) %>%
   filter(horizon >=0) %>% 
   # mutate(geo_value=replace_na(geo_value,"us"))%>%
